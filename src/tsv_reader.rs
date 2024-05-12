@@ -1,5 +1,4 @@
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader};
@@ -14,6 +13,16 @@ pub enum ColumnType {
     VolatileString,
     /// Column contains strings that are repeated many times.
     HashtableString,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MissingValuePolicy {
+    /// Omit the row if there is a missing value in it.
+    OmitRow,
+    /// Panic if there is a missing value in the row.
+    Panic,
+    /// Replace the missing value with an empty string.
+    ReplaceWithEmptyString,
 }
 
 #[derive(Debug)]
@@ -37,15 +46,15 @@ impl TabSeparatedFileReader {
     }
 
     /// Reads a line from the file and splits it by tabs.
-    pub fn read_line_and_split(&mut self) -> std::io::Result<Vec<String>> {
-        let mut line = String::new();
-        self.reader.read_line(&mut line)?;
+    pub fn read_line_and_split<'a>(&'a mut self, line_buf: &'a mut String) -> Option<std::str::Split<'_, char>> {
+        line_buf.clear();
+        self.reader.read_line(line_buf).unwrap();
 
-        if line.is_empty() {
-            return Ok(vec![]);
+        if line_buf.is_empty() {
+            return None;
         }
 
-        Ok(line.trim().split('\t').map(|s| s.to_string()).collect())
+        Some(line_buf.split('\t'))
     }
 
     /// Reads all lines of the file and guesses the column types based on the contents of the columns.
@@ -60,51 +69,79 @@ impl TabSeparatedFileReader {
     /// # Returns
     /// 
     /// * A dictionary where the keys are the column indices and the values are the column types.
-    pub fn guess_column_types_but_better(&mut self, column_indices: Vec<usize>, volatile_threshold_fraction: f32, min_sample_size: usize) -> Result<std::collections::HashMap<usize, ColumnType>, NotEnoughLinesError> {
-        let mut column_possibly_float: HashMap<usize, bool> = column_indices.iter().map(|&i| (i, true)).collect();
-        let mut column_possibly_integer: HashMap<usize, bool> = column_indices.iter().map(|&i| (i, true)).collect();
-        let mut column_possibly_hashtable_string: HashMap<usize, bool> = column_indices.iter().map(|&i| (i, true)).collect();
+    pub fn guess_column_types_but_better(
+        &mut self,
+        columns: std::collections::HashMap<usize, MissingValuePolicy>,
+        volatile_threshold_fraction: f32,
+        min_sample_size: usize
+    ) -> Result<std::collections::HashMap<usize, ColumnType>, NotEnoughLinesError> {
+        let mut sorted_column_indices: Vec<usize> = columns.keys().copied().collect();
+        sorted_column_indices.sort();
+
+        let mut column_possibly_float: Vec<bool> = sorted_column_indices.iter().map(|_| true).collect();
+        let mut column_possibly_integer: Vec<bool> = sorted_column_indices.iter().map(|_| true).collect();
+        let mut column_possibly_hashtable_string: Vec<bool> = sorted_column_indices.iter().map(|_| true).collect();
 
         // We only keep track of the hashes of the values to save memory, as we don't need to store the actual values.
         let mut column_value_hashes: std::collections::HashMap<usize, std::collections::HashSet<u64>> = std::collections::HashMap::new();
 
         let mut loop_counter: usize = 0;
 
-        loop {
+        let mut line_buf = String::new();
+        
+        'row_loop: loop {
             loop_counter += 1;
+            let mut cell_bufs: Vec<&str> = sorted_column_indices.iter().map(|_| "").collect();
 
-            let row = self.read_line_and_split().unwrap();
-            if row.is_empty() {
-                break;
-            }
+            let row = match self.read_line_and_split(&mut line_buf) {
+                Some(row) => row,
+                None => break,
+            };
 
-            for (i, value) in row.iter().enumerate() {
-                if !column_indices.contains(&i) {
+            let mut current_cell_buf_index = 0;
+            for (wide_index, value) in row.enumerate() {
+                if !columns.contains_key(&wide_index) {
                     continue;
                 }
 
-                if column_possibly_float[&i] {
-                    if value.parse::<f64>().is_err() {
-                        column_possibly_float.insert(i, false);
+                cell_bufs[current_cell_buf_index] = value;
+                current_cell_buf_index += 1;
+
+                if value.is_empty() {
+                    match columns[&wide_index] {
+                        MissingValuePolicy::OmitRow => continue 'row_loop,
+                        MissingValuePolicy::Panic => panic!("Missing value in column {} in line {}.", wide_index, loop_counter),
+                        MissingValuePolicy::ReplaceWithEmptyString => {}, // Do nothing, as the value is already an empty string.
                     }
-                } else if column_possibly_integer[&i] {
+                }
+            }
+            
+            for (narrow_index, value) in cell_bufs.iter().enumerate() {
+
+                if column_possibly_float[narrow_index] {
+                    if value.parse::<f64>().is_err() {
+                        println!("Failed to parse value {} as float in column {}.", value, sorted_column_indices[narrow_index]);
+                        column_possibly_float.insert(narrow_index, false);
+                    }
+                } else if column_possibly_integer[narrow_index] {
                     if value.parse::<i64>().is_err() {
-                        column_possibly_integer.insert(i, false);
+                        println!("Failed to parse value {} as integer in column {}.", value, sorted_column_indices[narrow_index]);
+                        column_possibly_integer.insert(narrow_index, false);
                     }
                 }
 
-                if column_possibly_hashtable_string[&i] {
+                if column_possibly_hashtable_string[narrow_index] {
                     let mut hasher = DefaultHasher::new();
                     value.hash(&mut hasher);
                     let value_hash = hasher.finish();
     
-                    let hashes = column_value_hashes.entry(i).or_insert_with(std::collections::HashSet::new);
+                    let hashes = column_value_hashes.entry(narrow_index).or_insert_with(std::collections::HashSet::new);
                     hashes.insert(value_hash);
 
                     if loop_counter >= min_sample_size && hashes.len() > (loop_counter as f32 * volatile_threshold_fraction) as usize {
-                        println!("Determined column {} to be volatile after {} iterations.", i, loop_counter);
-                        column_possibly_hashtable_string.insert(i, false);
-                        column_value_hashes.remove(&i);
+                        println!("Determined column {} to be volatile after {} iterations.", sorted_column_indices[narrow_index], loop_counter);
+                        column_possibly_hashtable_string.insert(narrow_index, false);
+                        column_value_hashes.remove(&narrow_index);
                     }
                 }
             }
@@ -116,21 +153,21 @@ impl TabSeparatedFileReader {
 
         let mut column_types = std::collections::HashMap::new();
 
-        for i in column_indices.iter() {
-            if column_possibly_float[i] {
-                column_types.insert(*i, ColumnType::Float);
+        for (narrow_index, wide_index) in sorted_column_indices.iter().enumerate() {
+            if column_possibly_float[narrow_index] {
+                column_types.insert(*wide_index, ColumnType::Float);
                 continue;
             }
 
-            if column_possibly_integer[i] {
-                column_types.insert(*i, ColumnType::Integer);
+            if column_possibly_integer[narrow_index] {
+                column_types.insert(*wide_index, ColumnType::Integer);
                 continue;
             }
 
-            if column_possibly_hashtable_string[i] {
-                column_types.insert(*i, ColumnType::HashtableString);
+            if column_possibly_hashtable_string[narrow_index] {
+                column_types.insert(*wide_index, ColumnType::HashtableString);
             } else {
-                column_types.insert(*i, ColumnType::VolatileString);
+                column_types.insert(*wide_index, ColumnType::VolatileString);
             }
         }
 
