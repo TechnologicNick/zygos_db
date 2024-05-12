@@ -123,7 +123,9 @@ impl TabSeparatedFileReader {
                         println!("Failed to parse value {} as float in column {}.", value, sorted_column_indices[narrow_index]);
                         column_possibly_float.insert(narrow_index, false);
                     }
-                } else if column_possibly_integer[narrow_index] {
+                }
+                
+                if column_possibly_integer[narrow_index] {
                     if value.parse::<i64>().is_err() {
                         println!("Failed to parse value {} as integer in column {}.", value, sorted_column_indices[narrow_index]);
                         column_possibly_integer.insert(narrow_index, false);
