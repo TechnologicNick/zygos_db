@@ -2,3 +2,6 @@
 name = "zygos_db"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+flate2 = "1.0.30"

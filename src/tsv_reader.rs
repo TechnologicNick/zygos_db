@@ -1,7 +1,9 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+
+use flate2::read::GzDecoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColumnType {
@@ -15,6 +17,7 @@ pub enum ColumnType {
     HashtableString,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MissingValuePolicy {
     /// Omit the row if there is a missing value in it.
@@ -34,14 +37,44 @@ impl std::fmt::Display for NotEnoughLinesError {
     }
 }
 
+pub enum FileReader {
+    Regular(File),
+    Gzipped(GzDecoder<File>),
+}
+
+impl FileReader {
+    pub fn new(file: File) -> Self {
+        let mut magic_bytes = [0; 2];
+
+        BufReader::new(file.try_clone().unwrap()).read_exact(magic_bytes.as_mut()).unwrap();
+
+        file.try_clone().unwrap().seek(SeekFrom::Start(0)).unwrap();
+
+        if magic_bytes == [0x1f, 0x8b] {
+            return Self::Gzipped(GzDecoder::new(file));
+        } else {
+            return Self::Regular(file);
+        }
+    }
+}
+
+impl Read for FileReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Regular(file) => file.read(buf),
+            Self::Gzipped(gzipped_file) => gzipped_file.read(buf),
+        }
+    }
+}
+
 pub struct TabSeparatedFileReader {
-    reader: BufReader<File>,
+    reader: BufReader<FileReader>,
 }
 
 impl TabSeparatedFileReader {
     pub fn new(file: File) -> Self {
         Self {
-            reader: BufReader::new(file),
+            reader: BufReader::new(FileReader::new(file)),
         }
     }
 
