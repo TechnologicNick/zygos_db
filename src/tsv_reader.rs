@@ -118,17 +118,17 @@ impl TabSeparatedFileReader {
             
             for (narrow_index, value) in cell_bufs.iter().enumerate() {
 
-                if column_possibly_float[narrow_index] {
-                    if value.parse::<f64>().is_err() {
-                        println!("Failed to parse value {} as float in column {}.", value, sorted_column_indices[narrow_index]);
-                        column_possibly_float.insert(narrow_index, false);
-                    }
-                }
-                
                 if column_possibly_integer[narrow_index] {
                     if value.parse::<i64>().is_err() {
                         println!("Failed to parse value {} as integer in column {}.", value, sorted_column_indices[narrow_index]);
                         column_possibly_integer.insert(narrow_index, false);
+                    }
+                }
+
+                if column_possibly_float[narrow_index] {
+                    if value.parse::<f64>().is_err() {
+                        println!("Failed to parse value {} as float in column {}.", value, sorted_column_indices[narrow_index]);
+                        column_possibly_float.insert(narrow_index, false);
                     }
                 }
 
@@ -156,13 +156,13 @@ impl TabSeparatedFileReader {
         let mut column_types = std::collections::HashMap::new();
 
         for (narrow_index, wide_index) in sorted_column_indices.iter().enumerate() {
-            if column_possibly_float[narrow_index] {
-                column_types.insert(*wide_index, ColumnType::Float);
+            if column_possibly_integer[narrow_index] {
+                column_types.insert(*wide_index, ColumnType::Integer);
                 continue;
             }
 
-            if column_possibly_integer[narrow_index] {
-                column_types.insert(*wide_index, ColumnType::Integer);
+            if column_possibly_float[narrow_index] {
+                column_types.insert(*wide_index, ColumnType::Float);
                 continue;
             }
 
