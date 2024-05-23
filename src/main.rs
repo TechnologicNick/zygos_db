@@ -35,7 +35,7 @@ struct GuessColumnTypesArgs {
     #[arg(short, long, default_value_t = 1000)]
     min_sample_size: usize,
     /// The policy to use for missing values.
-    #[arg(value_enum, short = 'p', long, default_value_t = tsv_reader::MissingValuePolicy::OmitRow)]
+    #[arg(value_enum, short = 'p', long, default_value_t = tsv_reader::MissingValuePolicy::ReplaceWithEmptyString)]
     missing_value_policy: tsv_reader::MissingValuePolicy,
 }
 
@@ -83,6 +83,8 @@ fn guess_column_types(args: GuessColumnTypesArgs) {
             None
         }
     }).map(|i| (i, args.missing_value_policy)).collect();
+
+    println!("Interesting column indices: {:?}", interesting_column_indices);
     
     let column_types = reader.guess_column_types_but_better(
         interesting_column_indices,
