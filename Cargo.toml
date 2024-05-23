@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ascii_table = "4.0.3"
+clap = { version = "4.5.4", features = ["derive"] }
+crossterm = "0.27.0"
 flate2 = "1.0.30"

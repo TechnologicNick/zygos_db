@@ -1,34 +1,136 @@
 mod tsv_reader;
 
-fn main() {
-    println!("Hello, world!");
+use clap::{Args, Parser, Subcommand};
+use ascii_table::AsciiTable;
+use crossterm::tty::IsTty;
 
-    let file = std::fs::File::open("gwas_catalog_v1.0.2-associations_e111_r2024-04-22.tsv").unwrap();
+/// ZygosDB: A database for storing and querying genetic data.
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Read a TSV file and guess the column types.
+    GuessColumnTypes(GuessColumnTypesArgs),
+    /// Parse the TSV header and the first few rows and prints a formatted table.
+    Sample(SampleArgs)
+}
+
+#[derive(Args)]
+struct GuessColumnTypesArgs {
+    /// The TSV file to read.
+    file: String,
+    /// Column names to guess the types of.
+    #[arg(short, long)]
+    column_names: Vec<String>,
+    /// The fraction between 0 and 1 of the number of distinct values in a column that determines if the column is considered a volatile string column.
+    #[arg(short, long, default_value_t = 0.2)]
+    volatile_threshold_fraction: f32,
+    /// The minimum number of lines to read to guess the column types.
+    #[arg(short, long, default_value_t = 1000)]
+    min_sample_size: usize,
+    /// The policy to use for missing values.
+    #[arg(value_enum, short = 'p', long, default_value_t = tsv_reader::MissingValuePolicy::OmitRow)]
+    missing_value_policy: tsv_reader::MissingValuePolicy,
+}
+
+#[derive(Args)]
+struct SampleArgs {
+    /// The TSV file to read.
+    file: String,
+    /// The number of rows to read.
+    #[arg(short, long, default_value_t = 10)]
+    rows: usize,
+    /// The maximum width of the table. If not specified, the width of the terminal is used.
+    #[arg(short = 'w', long)]
+    max_width: Option<usize>,
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::GuessColumnTypes(args) => guess_column_types(args),
+        Commands::Sample(args) => sample(args),
+    }
+}
+
+fn guess_column_types(args: GuessColumnTypesArgs) {
+    let file = std::fs::File::open(args.file).unwrap();
     let mut reader: tsv_reader::TabSeparatedFileReader = tsv_reader::TabSeparatedFileReader::new(file);
 
     let mut line_buf = String::new();
-    let column_names: Vec<String> = reader.read_line_and_split(&mut line_buf).unwrap().map(|s| s.to_owned()).collect();
-    println!("Column names: {:?}", column_names);
+    let found_column_names: Vec<String> = reader.read_line_and_split(&mut line_buf).unwrap().map(|s| s.to_owned()).collect();
 
-    let interesting_column_names = vec!["STUDY", "SNPS", "P-VALUE", "CHR_POS"];
+    // Verify all column names are present
+    for column_name in args.column_names.iter() {
+        if !found_column_names.contains(column_name) {
+            eprintln!("Column name '{}' not found in file.", column_name);
+            std::process::exit(1);
+        }
+    }
 
-    let interesting_column_indices: std::collections::HashMap<usize, tsv_reader::MissingValuePolicy> = column_names.iter().enumerate().filter_map(|(i, header)| {
-        if interesting_column_names.contains(&header.as_str()) {
+    let interesting_column_indices: std::collections::HashMap<usize, tsv_reader::MissingValuePolicy> = found_column_names.iter().enumerate().filter_map(|(i, header)| {
+        // If the column name is in the list of column names to guess, or if the list is empty, include the column
+        if args.column_names.contains(&header) || args.column_names.is_empty() {
             Some(i)
         } else {
             None
         }
-    }).map(|i| (i, tsv_reader::MissingValuePolicy::OmitRow)).collect();
-
+    }).map(|i| (i, args.missing_value_policy)).collect();
+    
     let column_types = reader.guess_column_types_but_better(
         interesting_column_indices,
-        0.2,
-        1000
+        args.volatile_threshold_fraction,
+        args.min_sample_size
     ).unwrap();
 
     let named_column_types: std::collections::HashMap<String, &tsv_reader::ColumnType> = column_types.iter().map(|(&i, t)| {
-        (column_names[i].to_owned(), t)
+        (found_column_names[i].to_owned(), t)
     }).collect();
 
     println!("Column types: {:?}", named_column_types);
+}
+
+fn sample(args: SampleArgs) {
+    let file = std::fs::File::open(args.file).unwrap();
+    let mut reader: tsv_reader::TabSeparatedFileReader = tsv_reader::TabSeparatedFileReader::new(file);
+
+    let mut line_buf = String::new();
+    
+    let mut ascii_table = AsciiTable::default();
+
+    if args.max_width.is_some() {
+        ascii_table.set_max_width(args.max_width.unwrap());
+    } else if std::io::stdout().is_tty() {
+        match crossterm::terminal::size() {
+            Ok((width, _)) => ascii_table.set_max_width(width as usize),
+            Err(_) => ascii_table.set_max_width(usize::MAX),
+        };
+    } else {
+        ascii_table.set_max_width(usize::MAX);
+    }
+
+
+    let mut data: Vec<Vec<String>> = vec![];
+
+    // Read the column names
+    for (i, column_name) in reader.read_line_and_split(&mut line_buf).expect("Empty file").enumerate() {
+        ascii_table.column(i).set_header(format!("{:?}", column_name));
+    }
+
+    for _ in 0..args.rows {
+        let line: Vec<String> = match reader.read_line_and_split(&mut line_buf) {
+            Some(line) => line.into_iter().map(|s| format!("{:?}", s)).collect(),
+            None => break,
+        };
+        data.push(line);
+    }
+
+    ascii_table.print(data);
 }

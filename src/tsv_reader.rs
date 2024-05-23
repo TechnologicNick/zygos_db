@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use clap::ValueEnum;
 
 use flate2::read::GzDecoder;
 
@@ -18,7 +19,7 @@ pub enum ColumnType {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
 pub enum MissingValuePolicy {
     /// Omit the row if there is a missing value in it.
     OmitRow,
