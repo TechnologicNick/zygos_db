@@ -123,7 +123,7 @@ fn sample(args: SampleArgs) {
 
     // Read the column names
     for (i, column_name) in reader.read_line_and_split(&mut line_buf).expect("Empty file").enumerate() {
-        ascii_table.column(i).set_header(format!("{:?}", column_name));
+        ascii_table.column(i).set_header(format!("{} {:?}", i, column_name));
     }
 
     for _ in 0..args.rows {

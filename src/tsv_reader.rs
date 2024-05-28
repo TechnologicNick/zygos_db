@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use clap::ValueEnum;
 
 use flate2::read::GzDecoder;
+use tar::{Archive, Entry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColumnType {
@@ -38,41 +39,109 @@ impl std::fmt::Display for NotEnoughLinesError {
     }
 }
 
-pub enum FileReader {
+pub enum FileReader<'a> {
+    /// A regular file.
     Regular(File),
-    Gzipped(GzDecoder<File>),
+    /// A gzipped file.
+    Gz(GzDecoder<File>),
+    /// A tar archive with a single regular file.
+    Tar(Entry<'a, File>),
+    /// A tar archive with a single gzipped file.
+    GzTar(GzDecoder<Entry<'a, File>>),
+    // A tar archive with a single regular file, that is gzipped.
+    // TarGz,
 }
 
-impl FileReader {
+impl FileReader<'_> {
     pub fn new(file: File) -> Self {
+
+        if FileReader::is_gzipped(file.try_clone().unwrap()) {
+            return Self::Gz(GzDecoder::new(file));
+        } else if FileReader::is_tar(file.try_clone().unwrap()) {
+            let entry_count = FileReader::tar_get_entry_count(file.try_clone().unwrap());
+            if entry_count != 1 {
+                panic!("Tar archive must contain exactly one file, found {}", entry_count);
+            }
+
+            
+            
+            if FileReader::read_gz_magic(&mut Archive::new(file.try_clone().unwrap()).entries().unwrap().next().unwrap().unwrap()) {
+                let archive = Box::new(Archive::new(file));
+                let leaked = Box::leak(archive);
+                let entry = GzDecoder::new(leaked.entries().unwrap().next().unwrap().unwrap());
+
+                return Self::GzTar(entry);
+            } else {
+                let archive = Box::new(Archive::new(file));
+                let leaked = Box::leak(archive);
+                let entry = leaked.entries().unwrap().next().unwrap().unwrap();
+
+                return Self::Tar(entry);
+            }
+        } else {
+            return Self::Regular(file);
+        }
+    }
+
+    fn read_gz_magic(readable: &mut dyn Read) -> bool {
         let mut magic_bytes = [0; 2];
+
+        BufReader::new(readable).read_exact(magic_bytes.as_mut()).unwrap();
+
+        magic_bytes == [0x1f, 0x8b]
+    }
+    
+    fn is_gzipped(file: File) -> bool {
+        file.try_clone().unwrap().seek(SeekFrom::Start(0)).unwrap();
+
+        let result = FileReader::read_gz_magic(&mut file.try_clone().unwrap());
+
+        file.try_clone().unwrap().seek(SeekFrom::Start(0)).unwrap();
+
+        return result;
+    }
+
+    fn is_tar(file: File) -> bool {
+        let mut magic_bytes = [0; 6];
+
+        file.try_clone().unwrap().seek(SeekFrom::Start(0x101)).unwrap();
 
         BufReader::new(file.try_clone().unwrap()).read_exact(magic_bytes.as_mut()).unwrap();
 
         file.try_clone().unwrap().seek(SeekFrom::Start(0)).unwrap();
 
-        if magic_bytes == [0x1f, 0x8b] {
-            return Self::Gzipped(GzDecoder::new(file));
-        } else {
-            return Self::Regular(file);
+        return magic_bytes == "ustar ".as_bytes() || magic_bytes == "ustar\0".as_bytes();
+    }
+
+    fn tar_get_entry_count(file: File) -> usize {
+        let mut archive = Archive::new(file);
+        let mut count = 0;
+
+        for entry in archive.entries().unwrap() {
+            println!("{:?}", entry.unwrap().path().unwrap());
+            count += 1;
         }
+
+        count
     }
 }
 
-impl Read for FileReader {
+impl Read for FileReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Self::Regular(file) => file.read(buf),
-            Self::Gzipped(gzipped_file) => gzipped_file.read(buf),
+            Self::Gz(gzipped_file) => gzipped_file.read(buf),
+            Self::Tar(entry) => entry.read(buf),
+            Self::GzTar(gzipped_entry) => gzipped_entry.read(buf),
         }
     }
 }
 
-pub struct TabSeparatedFileReader {
-    reader: BufReader<FileReader>,
+pub struct TabSeparatedFileReader<'a> {
+    reader: BufReader<FileReader<'a>>,
 }
 
-impl TabSeparatedFileReader {
+impl TabSeparatedFileReader<'_> {
     pub fn new(file: File) -> Self {
         Self {
             reader: BufReader::new(FileReader::new(file)),
@@ -143,7 +212,10 @@ impl TabSeparatedFileReader {
 
                 if value.is_empty() {
                     match columns[&wide_index] {
-                        MissingValuePolicy::OmitRow => continue 'row_loop,
+                        MissingValuePolicy::OmitRow => {
+                            println!("Omitting row {} due to missing value in column {}.", loop_counter, wide_index);
+                            continue 'row_loop;
+                        },
                         MissingValuePolicy::Panic => panic!("Missing value in column {} in line {}.", wide_index, loop_counter),
                         MissingValuePolicy::ReplaceWithEmptyString => {}, // Do nothing, as the value is already an empty string.
                     }
