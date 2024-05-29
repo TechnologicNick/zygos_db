@@ -1,4 +1,5 @@
 mod tsv_reader;
+mod config;
 
 use clap::{Args, Parser, Subcommand};
 use ascii_table::AsciiTable;
@@ -18,7 +19,9 @@ enum Commands {
     /// Read a TSV file and guess the column types.
     GuessColumnTypes(GuessColumnTypesArgs),
     /// Parse the TSV header and the first few rows and prints a formatted table.
-    Sample(SampleArgs)
+    Sample(SampleArgs),
+    /// Build the database from a config file.
+    Build(BuildArgs),
 }
 
 #[derive(Args)]
@@ -51,12 +54,19 @@ struct SampleArgs {
     max_width: Option<usize>,
 }
 
+#[derive(Args)]
+struct BuildArgs {
+    /// The path to the configuration file.
+    config: String,
+}
+
 fn main() {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::GuessColumnTypes(args) => guess_column_types(args),
         Commands::Sample(args) => sample(args),
+        Commands::Build(args) => build(args),
     }
 }
 
@@ -135,4 +145,26 @@ fn sample(args: SampleArgs) {
     }
 
     ascii_table.print(data);
+}
+
+fn build(args: BuildArgs) {
+    println!("Building database from config file: {}", args.config);
+
+    let config = match config::Config::from_file(&args.config) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Failed to parse config file: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    match config.validate() {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Config validation failed:\n\t{}", e);
+            std::process::exit(1);
+        }
+    }
+
+    println!("Config: {:?}", config);
 }

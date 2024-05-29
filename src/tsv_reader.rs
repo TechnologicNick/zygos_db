@@ -5,8 +5,10 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use clap::ValueEnum;
 
 use flate2::read::GzDecoder;
+use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ColumnType {
     /// Column contains only integers.
     Integer,
