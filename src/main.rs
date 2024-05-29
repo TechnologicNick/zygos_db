@@ -1,5 +1,8 @@
 mod tsv_reader;
 mod config;
+mod database;
+
+use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use ascii_table::AsciiTable;
@@ -58,6 +61,11 @@ struct SampleArgs {
 struct BuildArgs {
     /// The path to the configuration file.
     config: String,
+    /// The path to the built database.
+    /// If not specified, the database is built in the directory of the configuration file with the extension `.zygosdb`.
+    /// If the database already exists, it is overwritten.
+    #[arg(short, long)]
+    output: Option<String>,
 }
 
 fn main() {
@@ -166,5 +174,23 @@ fn build(args: BuildArgs) {
         }
     }
 
-    println!("Config: {:?}", config);
+    let output = match args.output {
+        Some(output) => PathBuf::from(output),
+        None => {
+            let mut output = PathBuf::from(&args.config);
+            output.set_extension("zygosdb");
+            output
+        }
+    };
+
+    let database = database::Database::new(output, config);
+    match database.save() {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Failed to save database: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    println!("Database: {:?}", database);
 }

@@ -17,10 +17,17 @@ pub struct ConfigMetadata {
 
 #[derive(Debug, Deserialize)]
 pub struct Dataset {
+    #[serde(skip)]
+    pub metadata: Option<DatasetMetadata>,
     pub file_per_chromosome: bool,
     pub chromosomes: Option<Vec<u8>>,
     pub path: String,
     pub columns: Vec<Column>,
+}
+
+#[derive(Debug)]
+pub struct DatasetMetadata {
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +65,12 @@ impl Config {
             config_path: PathBuf::from(path),
         });
 
+        for (name, dataset) in &mut res.datasets {
+            dataset.metadata = Some(DatasetMetadata {
+                name: name.to_owned(),
+            });
+        }
+
         Ok(res)
     }
 
@@ -73,6 +86,15 @@ impl Config {
     fn validate_dataset(&self, dataset: &Dataset) -> Result<(), String> {
         self.validate_path(dataset)?;
         self.validate_columns(dataset)?;
+
+        match dataset.metadata.as_ref() {
+            Some(metadata) => {
+                if metadata.name.len() > 255 {
+                    return Err(format!("Dataset name '{}' is too long (max 255 characters)", metadata.name));
+                }
+            },
+            None => panic!("metadata must be present")
+        }
 
         Ok(())
     }
@@ -131,6 +153,20 @@ impl Config {
                 return Err(format!("Column '{}' with the role 'position-start' must have the type 'integer'", column.name).to_string());
             } else if column.role == ColumnRole::PositionEnd && column.type_ != ColumnType::Integer {
                 return Err(format!("Column '{}' with the role 'position-end' must have the type 'integer'", column.name).to_string());
+            }
+        }
+
+        for (i, column) in dataset.columns.iter().enumerate() {
+            if column.name.len() > 255 {
+                return Err(format!("Column name '{}' is too long (max 255 characters)", column.name));
+            }
+
+            if i == 0 && column_role_counts.get(&ColumnRole::Position).is_some() && column.role != ColumnRole::Position {
+                return Err("The column with role 'position' must be the first column".to_string());
+            } else if i == 0 && column_role_counts.get(&ColumnRole::PositionStart).is_some() && column.role != ColumnRole::PositionStart {
+                return Err("The column with role 'position-start' must be the first column".to_string());
+            } else if i == 1 && column_role_counts.get(&ColumnRole::PositionEnd).is_some() && column.role != ColumnRole::PositionEnd {
+                return Err("The column with role 'position-end' must be the second column".to_string());
             }
         }
 
