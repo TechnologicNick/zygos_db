@@ -1,12 +1,12 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use serde::Deserialize;
-use crate::tsv_reader::ColumnType;
+use crate::tsv_reader::{ColumnType, MissingValuePolicy};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(skip)]
-    metadata: Option<ConfigMetadata>,
+    pub metadata: Option<ConfigMetadata>,
     pub datasets: HashMap<String, Dataset>,
 }
 
@@ -37,6 +37,8 @@ pub struct Column {
     pub type_: ColumnType,
     #[serde(default)]
     pub role: ColumnRole,
+    #[serde(default)]
+    pub missing_value_policy: MissingValuePolicy,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Clone, Copy, Hash)]
@@ -115,7 +117,7 @@ impl Config {
             return Err("'path' must contain '{chromosome}' when 'file_per_chromosome' is true".to_string());
         }
 
-        for path in dataset.get_paths(&self.metadata.as_ref().unwrap().config_path).values() {
+        for path in dataset.get_paths(&self.metadata.as_ref().unwrap().config_path).iter().map(|(_, path)| path) {
             if !path.is_file() {
                 return Err(format!("File '{}' does not exist", path.display()));
             }
@@ -176,7 +178,7 @@ impl Config {
 
 impl Dataset {
     /// Get the paths to the dataset files.
-    pub fn get_paths(&self, config_path: &PathBuf) -> HashMap<u8, PathBuf> {
+    pub fn get_paths(&self, config_path: &PathBuf) -> Vec<(u8, PathBuf)> {
         let config_dir = config_path.parent().unwrap();
 
         if self.file_per_chromosome {
@@ -186,8 +188,8 @@ impl Dataset {
                 (chromosome, config_dir.join(self.path.replace("{chromosome}", &chromosome.to_string())))
             }).collect()
         } else {
-            let mut paths = HashMap::new();
-            paths.insert(0, config_dir.join(self.path.to_owned()));
+            let mut paths = Vec::new();
+            paths.push((0, config_dir.join(self.path.to_owned())));
             paths
         }
     }

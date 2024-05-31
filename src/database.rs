@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use crate::config::{Column, Config, Dataset};
+use crate::tsv_reader::{CellValue, TabSeparatedFileReader};
 
 const HEADER_MAGIC: &[u8] = b"ZygosDB";
 const HEADER_VERSION: u8 = 1;
@@ -87,5 +88,49 @@ impl Database {
         bytes.push(column.type_ as u8);
         bytes.push(column_name.len() as u8);
         bytes.extend_from_slice(column_name.as_bytes());
+    }
+
+    pub fn load_datasets(&self) -> Result<(), String> {
+        for dataset in self.config.datasets.values() {
+            match self.load_dataset(dataset) {
+                Ok(_) => {},
+                Err(e) => return Err(format!("Failed to load dataset '{}':\n\t{}", dataset.metadata.as_ref().unwrap().name, e)),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_dataset(&self, dataset: &Dataset) -> Result<(), String> {
+        let config_path = &self.config.metadata.as_ref().expect("metadata must be present").config_path;
+        
+        for (chromosome, path) in dataset.get_paths(config_path) {
+            match self.load_dataset_file(&dataset, &path) {
+                Ok(_) => {},
+                Err(e) => return Err(format!("Failed to load file of chromosome {} '{}':\n\t{}", chromosome, path.display(), e)),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_dataset_file(&self, dataset: &Dataset, path: &PathBuf) -> Result<(), String> {
+        let mut reader = TabSeparatedFileReader::new(std::fs::File::open(path).unwrap());
+
+        let column_names = dataset.columns.iter().map(|column| column.name.to_owned()).collect();
+        let column_indices: Vec<(String, usize)> = reader.find_column_indices(&column_names)?;
+
+        let mut wide_index_to_config_column: Vec<(usize, &Column)> = Vec::new();
+        for (column_name, index) in column_indices {
+            match dataset.columns.iter().find(|column| column.name == column_name) {
+                Some(column) => wide_index_to_config_column.push((index, column)),
+                None => return Err(format!("Column '{}' not found in config", column_name)),
+            };
+        }
+
+        let all_data: Vec<Vec<CellValue>> = reader.read_all(&wide_index_to_config_column)?;
+        reader.convert_read_data(&dataset.columns, all_data)?;
+
+        Ok(())
     }
 }
