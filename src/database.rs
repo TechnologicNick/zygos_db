@@ -2,6 +2,8 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
 use crate::config::{Column, Config, Dataset};
 use crate::tsv_reader::{CellValue, TabSeparatedFileReader};
 
@@ -104,12 +106,15 @@ impl Database {
     fn load_dataset(&self, dataset: &Dataset) -> Result<(), String> {
         let config_path = &self.config.metadata.as_ref().expect("metadata must be present").config_path;
         
-        for (chromosome, path) in dataset.get_paths(config_path) {
+        let par_iter = dataset.get_paths(config_path).into_par_iter().map(|(chromosome, path)| {
             match self.load_dataset_file(&dataset, &path) {
-                Ok(_) => {},
-                Err(e) => return Err(format!("Failed to load file of chromosome {} '{}':\n\t{}", chromosome, path.display(), e)),
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("Failed to load file of chromosome {} '{}':\n\t{}", chromosome, path.display(), e)),
             }
-        }
+        });
+
+        let mut result = Vec::new();
+        par_iter.collect_into_vec(&mut result);
 
         Ok(())
     }
