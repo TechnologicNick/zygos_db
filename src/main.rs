@@ -50,8 +50,11 @@ struct SampleArgs {
     /// The TSV file to read.
     file: String,
     /// The number of rows to read.
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short = 'n', long, default_value_t = 10)]
     rows: usize,
+    /// The number of rows to skip.
+    #[arg(short = 's', long, default_value_t = 0)]
+    skip: usize,
     /// The maximum width of the table. If not specified, the width of the terminal is used.
     #[arg(short = 'w', long)]
     max_width: Option<usize>,
@@ -142,6 +145,11 @@ fn sample(args: SampleArgs) {
     // Read the column names
     for (i, column_name) in reader.read_line_and_split(&mut line_buf).expect("Empty file").enumerate() {
         ascii_table.column(i).set_header(format!("{:?}", column_name));
+    }
+
+    // Skip rows
+    if args.skip > 0 {
+        reader.skip_lines(args.skip).unwrap();
     }
 
     for _ in 0..args.rows {

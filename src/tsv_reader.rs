@@ -93,6 +93,15 @@ impl TabSeparatedFileReader {
         Some(line_buf.split('\t'))
     }
 
+    /// Skips a number of lines in the file.
+    pub fn skip_lines(&mut self, n: usize) -> std::io::Result<()>{
+        for _ in 0..n {
+            self.reader.read_line(&mut String::new())?;
+        }
+
+        Ok(())
+    }
+
     /// Reads all lines of the file and guesses the column types based on the contents of the columns.
     /// The contents of the read lines are discarded.
     /// 
