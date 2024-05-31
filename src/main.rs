@@ -142,9 +142,11 @@ fn sample(args: SampleArgs) {
 
     let mut data: Vec<Vec<String>> = vec![];
 
+    ascii_table.column(0).set_header("#");
+
     // Read the column names
     for (i, column_name) in reader.read_line_and_split(&mut line_buf).expect("Empty file").enumerate() {
-        ascii_table.column(i).set_header(format!("{:?}", column_name));
+        ascii_table.column(i + 1).set_header(format!("{} {:?}", i, column_name));
     }
 
     // Skip rows
@@ -152,9 +154,11 @@ fn sample(args: SampleArgs) {
         reader.skip_lines(args.skip).unwrap();
     }
 
-    for _ in 0..args.rows {
+    for i in 0..args.rows {
         let line: Vec<String> = match reader.read_line_and_split(&mut line_buf) {
-            Some(line) => line.into_iter().map(|s| format!("{:?}", s)).collect(),
+            Some(line) => std::iter::once(format!("{}", i + args.skip + 1))
+                .chain(line.into_iter().map(|s| format!("{:?}", s)))
+                .collect(),
             None => break,
         };
         data.push(line);
