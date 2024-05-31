@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use clap::ValueEnum;
 
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use serde::Deserialize;
 
 use crate::config::{Column, ColumnRole};
@@ -79,19 +79,19 @@ impl std::fmt::Display for NotEnoughLinesError {
 
 pub enum FileReader {
     Regular(File),
-    Gzipped(GzDecoder<File>),
+    Gzipped(MultiGzDecoder<File>),
 }
 
 impl FileReader {
     pub fn new(file: File) -> Self {
         let mut magic_bytes = [0; 2];
 
-        BufReader::new(file.try_clone().unwrap()).read_exact(magic_bytes.as_mut()).unwrap();
+        file.try_clone().unwrap().read_exact(magic_bytes.as_mut()).unwrap();
 
         file.try_clone().unwrap().seek(SeekFrom::Start(0)).unwrap();
 
         if magic_bytes == [0x1f, 0x8b] {
-            return Self::Gzipped(GzDecoder::new(file));
+            return Self::Gzipped(MultiGzDecoder::new(file));
         } else {
             return Self::Regular(file);
         }
@@ -113,8 +113,12 @@ pub struct TabSeparatedFileReader {
 
 impl TabSeparatedFileReader {
     pub fn new(file: File) -> Self {
+        Self::with_capacity(0x8000, file)
+    }
+
+    pub fn with_capacity(capacity: usize, file: File) -> Self {
         Self {
-            reader: BufReader::new(FileReader::new(file)),
+            reader: BufReader::with_capacity(capacity, FileReader::new(file)),
         }
     }
 
