@@ -329,7 +329,7 @@ impl TabSeparatedFileReader {
         Ok(rows)
     }
 
-    pub fn convert_read_data(&mut self, columns: &Vec<Column>, mut rows: Vec<Vec<CellValue>>) -> Result<(), String> {
+    pub fn convert_read_data(&mut self, columns: &Vec<Column>, mut rows: Vec<Vec<CellValue>>) -> Result<Vec<Vec<CellValue>>, String> {
         assert!(columns[0].role == ColumnRole::Position || columns[0].role == ColumnRole::PositionStart, "First column must be a position.");
 
         println!("First row: {:?}", rows[0]);
@@ -341,6 +341,6 @@ impl TabSeparatedFileReader {
             }
         });
 
-        Ok(())
+        Ok(rows)
     }
 }

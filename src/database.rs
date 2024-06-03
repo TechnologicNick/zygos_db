@@ -16,6 +16,16 @@ pub struct Database {
     config: Config,
 }
 
+pub struct Table {
+    #[allow(dead_code)]
+    chromosome: u8,
+    rows: Vec<Row>,
+}
+
+pub type Row = Vec<CellValue>;
+
+pub type IndicesList = Vec<(usize, usize)>;
+
 impl Database {
     pub fn new(path: std::path::PathBuf, config: Config) -> Self {
         Self {
@@ -31,6 +41,17 @@ impl Database {
 
         let mut bytes: Vec<u8> = Vec::new();
         self.serialize_database_header(&mut bytes);
+        
+
+        let loaded_datasets = match self.load_datasets() {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("Failed to load datasets:\n\t{}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let _dataset_indices = self.serialize_datasets(&mut bytes, loaded_datasets);
 
         file.write_all(&bytes)?;
 
@@ -92,23 +113,23 @@ impl Database {
         bytes.extend_from_slice(column_name.as_bytes());
     }
 
-    pub fn load_datasets(&self) -> Result<(), String> {
-        for dataset in self.config.datasets.values() {
+    pub fn load_datasets(&self) -> Result<Vec<(&Dataset, Vec<Table>)>, String> {
+        let loaded_datasets = self.config.datasets.values().map(|dataset| {
             match self.load_dataset(dataset) {
-                Ok(_) => {},
-                Err(e) => return Err(format!("Failed to load dataset '{}':\n\t{}", dataset.metadata.as_ref().unwrap().name, e)),
+                Ok(res) => Ok((dataset, res)),
+                Err(e) => Err(format!("Failed to load dataset '{}':\n\t{}", dataset.metadata.as_ref().unwrap().name, e)),
             }
-        }
+        }).collect::<Result<Vec<_>, _>>()?;
 
-        Ok(())
+        Ok(loaded_datasets)
     }
 
-    fn load_dataset(&self, dataset: &Dataset) -> Result<(), String> {
+    fn load_dataset(&self, dataset: &Dataset) -> Result<Vec<Table>, String> {
         let config_path = &self.config.metadata.as_ref().expect("metadata must be present").config_path;
         
         let par_iter = dataset.get_paths(config_path).into_par_iter().map(|(chromosome, path)| {
             match self.load_dataset_file(&dataset, &path) {
-                Ok(_) => Ok(()),
+                Ok(rows) => Ok(Table { chromosome, rows }),
                 Err(e) => Err(format!("Failed to load file of chromosome {} '{}':\n\t{}", chromosome, path.display(), e)),
             }
         });
@@ -116,10 +137,10 @@ impl Database {
         let mut result = Vec::new();
         par_iter.collect_into_vec(&mut result);
 
-        Ok(())
+        result.into_iter().collect()
     }
 
-    fn load_dataset_file(&self, dataset: &Dataset, path: &PathBuf) -> Result<(), String> {
+    fn load_dataset_file(&self, dataset: &Dataset, path: &PathBuf) -> Result<Vec<Row>, String> {
         let mut reader = TabSeparatedFileReader::new(std::fs::File::open(path).unwrap());
 
         let column_names = dataset.columns.iter().map(|column| column.name.to_owned()).collect();
@@ -133,9 +154,68 @@ impl Database {
             };
         }
 
-        let all_data: Vec<Vec<CellValue>> = reader.read_all(&wide_index_to_config_column)?;
-        reader.convert_read_data(&dataset.columns, all_data)?;
+        let all_data: Vec<Row> = reader.read_all(&wide_index_to_config_column)?;
+        let all_data: Vec<Row> = reader.convert_read_data(&dataset.columns, all_data)?;
 
-        Ok(())
+        Ok(all_data)
+    }
+
+    pub fn serialize_datasets(&self, bytes: &mut Vec<u8>, datasets: Vec<(&Dataset, Vec<Table>)>) -> Result<Vec<Vec<IndicesList>>, String> {
+        let mut dataset_indices = Vec::new();
+
+        for (dataset, all_data) in datasets {
+            let position_indices_list = self.serialize_dataset(bytes, dataset, all_data)?;
+            dataset_indices.push(position_indices_list);
+        }
+
+        Ok(dataset_indices)
+    }
+
+    pub fn serialize_dataset(&self, bytes: &mut Vec<u8>, dataset: &Dataset, tables: Vec<Table>) -> Result<Vec<IndicesList>, String> {
+        let mut indices = Vec::new();
+        
+        for table in tables {
+            let position_indices = self.serialize_dataset_file(bytes, dataset, table.rows)?;
+            indices.push(position_indices);
+        }
+
+        Ok(indices)
+    }
+
+    fn serialize_dataset_file(&self, bytes: &mut Vec<u8>, dataset: &Dataset, rows: Vec<Row>) -> Result<IndicesList, String> {
+        // Map of position (first column) to offset in the file
+        let mut position_indices: Vec<(usize, usize)> = Vec::new();
+
+        for (i_row, row) in rows.iter().enumerate() {
+            for (i_col, cell) in row.iter().enumerate() {
+                match cell {
+                    CellValue::Integer(i) => {
+                        if i_col == 0 {
+                            if *i < 0 {
+                                return Err(format!("Position must be a positive integer (column {:?}, row {})", dataset.columns[i_col].name, i_row));
+                            }
+                            position_indices.push((*i as usize, bytes.len()));
+                        }
+                        bytes.extend_from_slice(&i.to_be_bytes());
+                    },
+                    CellValue::Float(f) => {
+                        bytes.extend_from_slice(&f.to_be_bytes());
+                    },
+                    CellValue::String(s) => {
+                        let s_bytes = s.as_bytes();
+                        let s_len = s_bytes.len();
+
+                        if s_len > 255 {
+                            return Err(format!("Strings longer than 255 bytes are currently not supported (column {:?}, row {})", dataset.columns[i_col].name, i_row));
+                        }
+
+                        bytes.push(s_len as u8);
+                        bytes.extend_from_slice(s_bytes);
+                    },
+                }
+            }
+        }
+
+        Ok(position_indices)
     }
 }

@@ -204,13 +204,5 @@ fn build(args: BuildArgs) {
         }
     }
 
-    match database.load_datasets() {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("Failed to load datasets:\n\t{}", e);
-            std::process::exit(1);
-        }
-    }
-
     println!("Database: {:?}", database);
 }
