@@ -111,6 +111,8 @@ impl Config {
                 },
                 None => return Err("'chromosomes' must be specified when 'file_per_chromosome' is true".to_string()),
             }
+        } else {
+            return Err("Datasets with 'file_per_chromosome' set to false are currently not supported".to_string());
         }
 
         if !dataset.path.contains("{chromosome}") {
