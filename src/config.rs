@@ -23,6 +23,7 @@ pub struct Dataset {
     pub chromosomes: Option<Vec<u8>>,
     pub path: String,
     pub columns: Vec<Column>,
+    pub rows_per_index: usize,
 }
 
 #[derive(Debug)]
@@ -96,6 +97,10 @@ impl Config {
                 }
             },
             None => panic!("metadata must be present")
+        }
+
+        if dataset.rows_per_index == 0 {
+            return Err("'rows_per_index' must be greater than 0".to_string());
         }
 
         Ok(())

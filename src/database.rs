@@ -229,7 +229,9 @@ impl Database {
                             if *i < 0 {
                                 return Err(format!("Position must be a positive integer (column {:?}, row {})", dataset.columns[i_col].name, i_row));
                             }
-                            position_indices.push((*i as usize, bytes.len()));
+                            if i_row % dataset.rows_per_index == 0 {
+                                position_indices.push((*i as usize, bytes.len()));
+                            }
                         }
                         bytes.extend_from_slice(&i.to_be_bytes());
                     },
