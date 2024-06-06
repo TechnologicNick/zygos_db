@@ -40,7 +40,7 @@ impl Database {
         let mut file = std::fs::File::create(&self.path)?;
 
         let mut bytes: Vec<u8> = Vec::new();
-        self.serialize_database_header(&mut bytes);
+        let ptr_to_index_locations = self.serialize_database_header(&mut bytes);
         
 
         let loaded_datasets = match self.load_datasets() {
@@ -51,7 +51,13 @@ impl Database {
             }
         };
 
-        let _dataset_indices = self.serialize_datasets(&mut bytes, loaded_datasets);
+        match self.serialize_datasets(&mut bytes, loaded_datasets, ptr_to_index_locations) {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("Failed to serialize datasets:\n\t{}", e);
+                std::process::exit(1);
+            }
+        }
 
         file.write_all(&bytes)?;
 
@@ -77,7 +83,7 @@ impl Database {
         }
     }
 
-    pub fn serialize_database_header(&self, bytes: &mut Vec<u8>) -> () {
+    pub fn serialize_database_header(&self, bytes: &mut Vec<u8>) -> Vec<(&Dataset, Vec<(u8, usize)>)> {
         assert!(self.config.datasets.len() < 256);
 
         bytes.extend_from_slice(&HEADER_MAGIC);
@@ -85,12 +91,17 @@ impl Database {
 
         bytes.push(self.config.datasets.len() as u8);
 
+        let mut ptr_to_index_locations = Vec::new();
+
         for dataset in self.config.datasets.values() {
-            self.serialize_dataset_header(bytes, dataset);
+            let ptrs = self.serialize_dataset_header(bytes, dataset);
+            ptr_to_index_locations.push((dataset, ptrs));
         }
+
+        ptr_to_index_locations
     }
 
-    fn serialize_dataset_header(&self, bytes: &mut Vec<u8>, dataset: &Dataset) -> () {
+    fn serialize_dataset_header(&self, bytes: &mut Vec<u8>, dataset: &Dataset) -> Vec<(u8, usize)> {
         let dataset_name = &dataset.metadata.as_ref().unwrap().name;
         assert!(dataset_name.len() < 256);
 
@@ -102,6 +113,21 @@ impl Database {
         for column in dataset.columns.iter() {
             self.serialize_column_header(bytes, &column);
         }
+
+        let paths = dataset.get_paths(&PathBuf::from("."));
+        let file_count = paths.len();
+        assert!(file_count < 256, "Too many files for dataset '{}': max 255, got {}", dataset_name, file_count);
+        bytes.push(file_count as u8);
+
+        let mut ptr_to_index_locations = Vec::new();
+
+        for (chromosome, _) in paths {
+            bytes.push(chromosome);
+            ptr_to_index_locations.push((chromosome, bytes.len()));
+            bytes.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // Placeholder for the offset
+        }
+
+        ptr_to_index_locations
     }
 
     fn serialize_column_header(&self, bytes: &mut Vec<u8>, column: &Column) -> () {
@@ -160,26 +186,35 @@ impl Database {
         Ok(all_data)
     }
 
-    pub fn serialize_datasets(&self, bytes: &mut Vec<u8>, datasets: Vec<(&Dataset, Vec<Table>)>) -> Result<Vec<Vec<IndicesList>>, String> {
-        let mut dataset_indices = Vec::new();
+    pub fn serialize_datasets(
+        &self,
+        bytes: &mut Vec<u8>,
+        datasets: Vec<(&Dataset, Vec<Table>)>,
+        ptr_to_index_locations: Vec<(&Dataset, Vec<(u8, usize)>)>,
+    ) -> Result<(), String> {
 
-        for (dataset, all_data) in datasets {
-            let position_indices_list = self.serialize_dataset(bytes, dataset, all_data)?;
-            dataset_indices.push(position_indices_list);
+        for ((dataset, all_data), (_dataset, ptrs)) in datasets.into_iter().zip(ptr_to_index_locations) {
+            assert_eq!(dataset as *const _, _dataset as *const _);
+            self.serialize_dataset(bytes, dataset, all_data, ptrs)?;
         }
 
-        Ok(dataset_indices)
+        Ok(())
     }
 
-    pub fn serialize_dataset(&self, bytes: &mut Vec<u8>, dataset: &Dataset, tables: Vec<Table>) -> Result<Vec<IndicesList>, String> {
-        let mut indices = Vec::new();
-        
-        for table in tables {
+    pub fn serialize_dataset(&self, bytes: &mut Vec<u8>, dataset: &Dataset, tables: Vec<Table>, ptr_to_index_locations: Vec<(u8, usize)>) -> Result<(), String> {
+        for (table, (chromosome, ptr_to_index_location)) in tables.into_iter().zip(ptr_to_index_locations) {
+            assert_eq!(table.chromosome, chromosome);
             let position_indices = self.serialize_dataset_file(bytes, dataset, table.rows)?;
-            indices.push(position_indices);
+
+            // Update the location of the index in the header
+            let index_offset = bytes.len();
+            let index_size = 8;
+            bytes.splice(ptr_to_index_location..ptr_to_index_location + index_size, index_offset.to_be_bytes().into_iter());
+
+            self.serialize_table_index(bytes, position_indices);
         }
 
-        Ok(indices)
+        Ok(())
     }
 
     fn serialize_dataset_file(&self, bytes: &mut Vec<u8>, dataset: &Dataset, rows: Vec<Row>) -> Result<IndicesList, String> {
@@ -217,5 +252,15 @@ impl Database {
         }
 
         Ok(position_indices)
+    }
+
+    fn serialize_table_index(&self, bytes: &mut Vec<u8>, indices: IndicesList) {
+        bytes.extend_from_slice("INDEX".as_bytes());
+        bytes.extend_from_slice(&indices.len().to_be_bytes());
+
+        for (position, offset) in indices {
+            bytes.extend_from_slice(&position.to_be_bytes());
+            bytes.extend_from_slice(&offset.to_be_bytes());
+        }
     }
 }
