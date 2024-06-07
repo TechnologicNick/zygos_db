@@ -14,13 +14,13 @@ use crate::config::{Column, ColumnRole};
 #[serde(rename_all = "kebab-case")]
 pub enum ColumnType {
     /// Column contains only integers.
-    Integer,
+    Integer = 0,
     /// Column contains only floats.
-    Float,
+    Float = 1,
     /// Column contains a lot of different strings, but there can be duplicates.
-    VolatileString,
+    VolatileString = 2,
     /// Column contains strings that are repeated many times.
-    HashtableString,
+    HashtableString = 3,
 }
 
 impl ColumnType {
@@ -40,6 +40,20 @@ impl ColumnType {
             },
             Self::VolatileString => Ok(CellValue::String(value.to_owned())),
             Self::HashtableString => Ok(CellValue::String(value.to_owned())),
+        }
+    }
+}
+
+impl TryFrom<u8> for ColumnType {
+    type Error = ();
+
+    fn try_from(v: u8) -> Result<Self, ()> {
+        match v {
+            0 => Ok(Self::Integer),
+            1 => Ok(Self::Float),
+            2 => Ok(Self::VolatileString),
+            3 => Ok(Self::HashtableString),
+            _ => Err(()),
         }
     }
 }

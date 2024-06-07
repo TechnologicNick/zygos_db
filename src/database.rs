@@ -259,11 +259,19 @@ impl Database {
 
     fn serialize_table_index(&self, bytes: &mut Vec<u8>, indices: IndicesList) {
         bytes.extend_from_slice(INDEX_MAGIC);
+        
+        let ptr_to_end_offset = bytes.len();
+        bytes.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // Placeholder for the offset of the end of the index
+        
         bytes.extend_from_slice(&indices.len().to_be_bytes());
 
         for (position, offset) in indices {
             bytes.extend_from_slice(&position.to_be_bytes());
             bytes.extend_from_slice(&offset.to_be_bytes());
         }
+
+        let end_offset = bytes.len();
+        let end_size = 8;
+        bytes.splice(ptr_to_end_offset..ptr_to_end_offset + end_size, end_offset.to_be_bytes().into_iter());
     }
 }

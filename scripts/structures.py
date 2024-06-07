@@ -14,6 +14,7 @@ ColumnHeader = Struct(
 
 TableIndexList = Struct(
     "magic" / Const(b"INDEX"),
+    "end_offset" / Int64ub,
     "indices" / PrefixedArray(Int64ub, Struct(
         "position" / Int64ub,
         "offset" / Int64ub,

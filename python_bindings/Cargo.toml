@@ -9,5 +9,5 @@ name = "zygos_db"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.21.1"
+pyo3 = "0.21.2"
 zygos_db = { path = ".." }
