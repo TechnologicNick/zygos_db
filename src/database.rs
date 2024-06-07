@@ -234,7 +234,9 @@ impl Database {
                                 position_indices.push((*i as usize, bytes.len()));
                             }
                         }
-                        bytes.extend_from_slice(&i.to_be_bytes());
+
+                        let encoded = vint64::signed::encode(*i);
+                        bytes.extend_from_slice(encoded.as_ref());
                     },
                     CellValue::Float(f) => {
                         bytes.extend_from_slice(&f.to_be_bytes());
@@ -266,8 +268,8 @@ impl Database {
         bytes.extend_from_slice(&indices.len().to_be_bytes());
 
         for (position, offset) in indices {
-            bytes.extend_from_slice(&position.to_be_bytes());
-            bytes.extend_from_slice(&offset.to_be_bytes());
+            bytes.extend_from_slice(vint64::encode(position as u64).as_ref());
+            bytes.extend_from_slice(vint64::encode(offset as u64).as_ref());
         }
 
         let end_offset = bytes.len();

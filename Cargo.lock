@@ -444,6 +444,7 @@ name = "python_bindings"
 version = "0.1.0"
 dependencies = [
  "pyo3",
+ "vint64",
  "zygos_db",
 ]
 
@@ -630,6 +631,12 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
+name = "vint64"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0b3dd7987b5df43ec8f5a1050d608b4d9c78a5785c70549635870b9cad9442c"
 
 [[package]]
 name = "wasi"
@@ -819,4 +826,5 @@ dependencies = [
  "rayon",
  "serde",
  "toml",
+ "vint64",
 ]

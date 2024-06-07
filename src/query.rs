@@ -52,6 +52,17 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
         Ok(buf[0])
     }
 
+    fn read_vint64(&mut self) -> std::io::Result<u64> {
+        let mut buf = [0u8; 9];
+        self.reader.read_exact(&mut buf[0..1])?;
+        let len = vint64::decoded_len(buf[0]);
+
+        self.reader.read_exact(&mut buf[1..len])?;
+        let mut slice = &buf[..len];
+
+        Ok(vint64::decode(&mut slice).unwrap())
+    }
+
     pub fn read_string_u8(&mut self) -> std::io::Result<String> {
         let len = self.read_u8()? as usize;
         let mut buf = vec![0; len];
@@ -132,8 +143,8 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
         let mut res = BTreeMap::new();
 
         for _ in 0..num_indices {
-            let position = self.read_u64()?;
-            let offset = self.read_u64()?;
+            let position = self.read_vint64()?;
+            let offset = self.read_vint64()?;
 
             res.insert(position, offset);
         }
@@ -143,8 +154,8 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
 }
 
 pub struct TableIndex {
-    inner: BTreeMap<u64, u64>,
-    end_offset: u64,
+    pub inner: BTreeMap<u64, u64>,
+    pub end_offset: u64,
 }
 
 impl TableIndex {

@@ -140,7 +140,7 @@ impl DatabaseQueryClient {
     fn read_table_index(&mut self, offset: u64) -> PyResult<TableIndex> {
         let index = self.inner.read_table_index(offset)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
-        Ok(TableIndex { inner: index, path: self.path.clone() })
+        Ok(TableIndex { inner: index })
     }
 
     fn create_query(&mut self, dataset_name: &str, chromosome: u8) -> PyResult<RowReader> {
@@ -166,7 +166,6 @@ impl DatabaseQueryClient {
 #[pyclass]
 struct TableIndex {
     inner: zygos_db::query::TableIndex,
-    path: PathBuf,
 }
 
 #[pymethods]
@@ -177,6 +176,10 @@ impl TableIndex {
 
     fn get_range(&self, start: u64, end: u64) -> PyResult<Vec<(u64, u64)>> {
         Ok(self.inner.get_range(start, end))
+    }
+
+    fn get_end_offset(&self) -> u64 {
+        self.inner.end_offset
     }
 }
 
@@ -226,14 +229,21 @@ impl RowReader {
         let lambdas: Vec<_> = self.columns.iter().map(|column| {
             match column.type_ {
                 ColumnType::Integer => {
-                    |reader: &mut RowReader| (CellValue::I64(reader.read_i64().unwrap()), 8)
+                    |reader: &mut RowReader| {
+                        let (value, len) = reader.read_zigzag_i64().unwrap();
+                        (CellValue::I64(value), len)
+                    }
                 },
                 ColumnType::Float => {
                     |reader: &mut RowReader| (CellValue::F64(reader.read_f64().unwrap()), 8)
                 },
                 ColumnType::VolatileString => {
                     |reader: &mut RowReader| {
-                        let string = reader.read_string_u8().unwrap();
+                        let string = match reader.read_string_u8() {
+                            Ok(string) => string,
+                            Err(e) => panic!("Reading string failed at position {:?}: {:?}",
+                                reader.reader.seek(std::io::SeekFrom::Current(0)).unwrap(), e),
+                        };
                         let bytes_read = string.len() as usize + 1;
                         (CellValue::String(string), bytes_read)
                     }
@@ -288,6 +298,17 @@ impl RowReader {
         Ok(i64::from_be_bytes(buf))
     }
 
+    fn read_zigzag_i64(&mut self) -> std::io::Result<(i64, usize)> {
+        let mut buf = [0u8; 9];
+        self.reader.read_exact(&mut buf[0..1])?;
+        let len = vint64::decoded_len(buf[0]);
+
+        self.reader.read_exact(&mut buf[1..len])?;
+        let mut slice = &buf[..len];
+
+        Ok((vint64::signed::decode(&mut slice).unwrap(), len))
+    }
+
     fn read_u8(&mut self) -> std::io::Result<u8> {
         let mut buf = [0; size_of::<u8>()];
         self.reader.read_exact(&mut buf)?;
@@ -301,7 +322,7 @@ impl RowReader {
     }
 
     fn read_string_u8(&mut self) -> std::io::Result<String> {
-        let len = self.read_u8()? as usize;
+        let len: usize = self.read_u8()? as usize;
         let mut buf = vec![0; len];
         self.reader.read_exact(&mut buf)?;
         Ok(String::from_utf8(buf).map_err(|e| Error::new(ErrorKind::InvalidData, e))?)

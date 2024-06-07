@@ -10,4 +10,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.21.2"
+vint64 = "1.0.1"
 zygos_db = { path = ".." }
