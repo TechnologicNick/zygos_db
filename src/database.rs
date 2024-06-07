@@ -7,8 +7,9 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use crate::config::{Column, Config, Dataset};
 use crate::tsv_reader::{CellValue, TabSeparatedFileReader};
 
-const HEADER_MAGIC: &[u8] = b"ZygosDB";
-const HEADER_VERSION: u8 = 1;
+pub const HEADER_MAGIC: &[u8] = b"ZygosDB";
+pub const HEADER_VERSION: u8 = 1;
+pub const INDEX_MAGIC: &[u8] = b"INDEX";
 
 #[derive(Debug)]
 pub struct Database {
@@ -257,7 +258,7 @@ impl Database {
     }
 
     fn serialize_table_index(&self, bytes: &mut Vec<u8>, indices: IndicesList) {
-        bytes.extend_from_slice("INDEX".as_bytes());
+        bytes.extend_from_slice(INDEX_MAGIC);
         bytes.extend_from_slice(&indices.len().to_be_bytes());
 
         for (position, offset) in indices {

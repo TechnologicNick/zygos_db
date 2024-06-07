@@ -6,11 +6,25 @@ edition = "2021"
 [profile.release]
 debug = true
 
+[lib]
+name = "zygos_db"
+
+[[bin]]
+name = "zygos_db"
+path = "src/main.rs"
+
+[workspace]
+resolver = "2"
+members = [
+    "python_bindings",
+]
+
 [dependencies]
 ascii_table = "4.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
 crossterm = "0.27.0"
 flate2 = { version = "1.0.30", default-features = false, features = ["zlib-ng"] }
+pyo3 = "0.21.2"
 rayon = "1.10.0"
 serde = { version = "1.0.203", features = ["derive"] }
 toml = "0.8.13"

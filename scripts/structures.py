@@ -1,5 +1,5 @@
 from enum import IntEnum
-from construct import Array, Byte, Const, Enum, Int64ub, PascalString, Pointer, PrefixedArray, Probe, Struct, len_, this
+from construct import Byte, Const, Enum, Int64ub, PascalString, Pointer, PrefixedArray, Struct, this
 
 class ColumnType(IntEnum):
     Integer = 0
@@ -22,19 +22,16 @@ TableIndexList = Struct(
 
 DatasetHeader = Struct(
     "name" / PascalString(Byte, "utf8"),
-    "column_count" / Byte,
-    "columns" / Array(this.column_count, ColumnHeader),
-    "table_count" / Byte,
-    "table_indices" / Array(this.table_count, Struct(
+    "columns" / PrefixedArray(Byte, ColumnHeader),
+    "tables" / PrefixedArray(Byte, Struct(
         "chromosome" / Byte,
         "offset" / Int64ub,
-        "indices" / Pointer(this.offset, TableIndexList),
+        # "indices" / Pointer(this.offset, TableIndexList),
     )),
 )
 
 Database = Struct(
     "magic" / Const(b"ZygosDB"),
     "version" / Const(1, Byte),
-    "dataset_count" / Byte,
-    "dataset_headers" / Array(this.dataset_count, DatasetHeader),
+    "datasets" / PrefixedArray(Byte, DatasetHeader),
 )
