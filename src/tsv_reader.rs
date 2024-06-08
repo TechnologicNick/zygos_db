@@ -204,7 +204,7 @@ impl TabSeparatedFileReader {
             return None;
         }
 
-        Some(FastSplit::new(line_buf, self.split_on))
+        Some(FastSplit::new(line_buf.trim_end(), self.split_on))
     }
 
     /// Skips a number of lines in the file.
@@ -230,7 +230,7 @@ impl TabSeparatedFileReader {
         }
 
 
-        let split_commas: Vec<_> = FastSplit::new(&line_buf, ',').map(|s| s.to_owned()).collect();
+        let split_commas: Vec<_> = FastSplit::new(&line_buf.trim_end(), ',').map(|s| s.to_owned()).collect();
 
         if split_commas.len() > 1 {
             self.split_on = ',';
