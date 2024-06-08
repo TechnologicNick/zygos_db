@@ -145,7 +145,7 @@ fn sample(args: SampleArgs) {
     ascii_table.column(0).set_header("#");
 
     // Read the column names
-    for (i, column_name) in reader.read_line_and_split(&mut line_buf).expect("Empty file").enumerate() {
+    for (i, column_name) in reader.read_header().unwrap().iter().enumerate() {
         ascii_table.column(i + 1).set_header(format!("{} {:?}", i, column_name));
     }
 

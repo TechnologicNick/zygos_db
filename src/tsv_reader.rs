@@ -121,8 +121,66 @@ impl Read for FileReader {
     }
 }
 
+/// A fast iterator that splits a string by a character, but ignores the character if it is inside a string.
+pub struct FastSplit<'a> {
+    buf: &'a str,
+    split_on: char,
+    start: usize,
+    end: usize,
+    is_in_string: bool,
+}
+
+impl<'a> FastSplit<'a> {
+    fn new(buf: &'a str, split_on: char) -> Self {
+        Self {
+            buf,
+            split_on,
+            start: 0,
+            end: 0,
+            is_in_string: false,
+        }
+    }
+}
+
+impl<'a> Iterator for FastSplit<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.end == self.buf.len() {
+            return None;
+        }
+
+        let mut in_string = self.is_in_string;
+        let start = self.start;
+        let mut end = self.end;
+
+        for (i, c) in self.buf[self.end..].char_indices() {
+            end = self.end + i;
+
+            if c == '"' {
+                in_string = !in_string;
+            }
+
+            if c == self.split_on && !in_string {
+                self.start = end + 1;
+                self.end = end + 1;
+                self.is_in_string = in_string;
+
+                return Some(&self.buf[start..end]);
+            }
+        }
+
+        self.start = end + 1;
+        self.end = end + 1;
+        self.is_in_string = in_string;
+
+        Some(&self.buf[start..end + 1])
+    }
+}
+
 pub struct TabSeparatedFileReader {
     reader: BufReader<FileReader>,
+    split_on: char,
 }
 
 impl TabSeparatedFileReader {
@@ -133,11 +191,12 @@ impl TabSeparatedFileReader {
     pub fn with_capacity(capacity: usize, file: File) -> Self {
         Self {
             reader: BufReader::with_capacity(capacity, FileReader::new(file)),
+            split_on: '\t',
         }
     }
 
     /// Reads a line from the file and splits it by tabs.
-    pub fn read_line_and_split<'a>(&'a mut self, line_buf: &'a mut String) -> Option<std::str::Split<'_, char>> {
+    pub fn read_line_and_split<'a>(&'a mut self, line_buf: &'a mut String) -> Option<FastSplit> {
         line_buf.clear();
         self.reader.read_line(line_buf).unwrap();
 
@@ -145,7 +204,7 @@ impl TabSeparatedFileReader {
             return None;
         }
 
-        Some(line_buf.split('\t'))
+        Some(FastSplit::new(line_buf, self.split_on))
     }
 
     /// Skips a number of lines in the file.
@@ -160,10 +219,26 @@ impl TabSeparatedFileReader {
     /// Reads the header of the file.
     pub fn read_header(&mut self) -> Result<Vec<String>, String> {
         let mut line_buf = String::new();
-        match self.read_line_and_split(&mut line_buf) {
-            Some(header) => Ok(header.map(|s| s.to_owned()).collect()),
-            None => Err("Empty file.".to_string()),
+
+        let split_tabs: Vec<_> = match self.read_line_and_split(&mut line_buf) {
+            Some(header) => header.map(|s| s.to_owned()).collect(),
+            None => return Err("Empty file.".to_string()),
+        };
+
+        if split_tabs.len() > 1 {
+            return Ok(split_tabs);
         }
+
+
+        let split_commas: Vec<_> = FastSplit::new(&line_buf, ',').map(|s| s.to_owned()).collect();
+
+        if split_commas.len() > 1 {
+            self.split_on = ',';
+            return Ok(split_commas);
+        }
+
+
+        Err("Unable to determine the delimiter.".to_string())
     }
 
     /// Finds the indices of the columns with the given names in the header.
