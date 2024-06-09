@@ -149,13 +149,21 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
             res.insert(position, offset);
         }
 
-        Ok(TableIndex{ inner: res, end_offset })
+        Ok(TableIndex{
+            inner: res,
+            index_start_offset: offset,
+            index_end_offset: end_offset,
+        })
     }
 }
 
+#[derive(Clone)]
 pub struct TableIndex {
     pub inner: BTreeMap<u64, u64>,
-    pub end_offset: u64,
+    /// The offset in the file where the magic of the index is located
+    pub index_start_offset: u64,
+    /// The offset in the file where the index ends (exclusive)
+    pub index_end_offset: u64,
 }
 
 impl TableIndex {

@@ -9,15 +9,15 @@ def main(file: str):
     client = DatabaseQueryClient(file)
 
     query_start = 0
-    query_end = 249172500 # TODO: Prevent it from reading too far
+    query_end = 1000000000000
 
-    index = client.read_table_index(db.datasets[0].tables[0].offset)
+    index = client.read_table_index("alzheimer", 2)
     print(index.get_all())
     (_, start_offset) = index.get_range(query_start, query_end)[0]
-    row_reader = client.create_query("alzheimer", 1)
+    row_reader = index.create_query()
 
     time_start = time.time()
-    print(len(row_reader.deserialize_range(start_offset, index.get_end_offset(), query_end)))
+    print(len(row_reader.deserialize_range(start_offset, index.index_start_offset, query_end)))
     time_end = time.time()
     print("Time taken:", time_end - time_start)
 

@@ -137,13 +137,7 @@ impl DatabaseQueryClient {
         })
     }
 
-    fn read_table_index(&mut self, offset: u64) -> PyResult<TableIndex> {
-        let index = self.inner.read_table_index(offset)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
-        Ok(TableIndex { inner: index })
-    }
-
-    fn create_query(&mut self, dataset_name: &str, chromosome: u8) -> PyResult<RowReader> {
+    fn read_table_index(&mut self, dataset_name: &str, chromosome: u8) -> PyResult<TableIndex> {
         let dataset = self.header.datasets.iter()
             .find(|dataset| dataset.name == dataset_name)
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Dataset not found: {}", dataset_name)))?;
@@ -152,10 +146,16 @@ impl DatabaseQueryClient {
             .find(|table| table.chromosome == chromosome)
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Table not found: {}", chromosome)))?;
 
-        let path = self.path.clone();
-        let columns = dataset.columns.clone();
+        let index = self.inner.read_table_index(table.offset)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
-        Ok(RowReader::new(path, columns)?)
+        Ok(TableIndex {
+            inner: index,
+            dataset_name: dataset_name.to_string(),
+            chromosome,
+            columns: dataset.columns.clone(),
+            path: self.path.clone(),
+        })
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -164,8 +164,24 @@ impl DatabaseQueryClient {
 }
 
 #[pyclass]
+#[derive(Clone)]
 struct TableIndex {
     inner: zygos_db::query::TableIndex,
+    #[pyo3(get)]
+    dataset_name: String,
+    #[pyo3(get)]
+    chromosome: u8,
+    columns: Vec<ColumnHeader>,
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for TableIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableIndex")
+            .field("dataset_name", &self.dataset_name)
+            .field("chromosome", &self.chromosome)
+            .finish()
+    }
 }
 
 #[pymethods]
@@ -178,112 +194,47 @@ impl TableIndex {
         Ok(self.inner.get_range(start, end))
     }
 
-    fn get_end_offset(&self) -> u64 {
-        self.inner.end_offset
+    #[getter]
+    fn index_start_offset(&self) -> u64 {
+        self.inner.index_start_offset
+    }
+
+    #[getter]
+    fn index_end_offset(&self) -> u64 {
+        self.inner.index_end_offset
+    }
+
+    fn create_query(&self) -> PyResult<RowReader> {
+        Ok(RowReader::new(
+            self.path.clone(),
+            self.clone(),
+        )?)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("{:?}", self))
     }
 }
 
 #[pyclass]
 struct RowReader {
     reader: BufReader<File>,
-    columns: Vec<ColumnHeader>,
+    index: TableIndex,
 }
 
-#[pymethods]
 impl RowReader {
-    #[new]
-    fn new(path: PathBuf, columns: Vec<ColumnHeader>) -> std::io::Result<Self> {
+    fn new(path: PathBuf, index: TableIndex) -> std::io::Result<Self> {
         let file = OpenOptions::new()
             .read(true)
             .open(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
-        let reader  = BufReader::new(file);
+        let reader = BufReader::new(file);
 
         Ok(Self {
             reader,
-            columns,
+            index,
         })
-    }
-
-    
-    /// Deserialize a range of bytes from the reader
-    /// 
-    /// # Arguments
-    /// 
-    /// * `start` - The start of the range (inclusive). This must be at the start of a row
-    /// * `end` - The end of the range (exclusive)
-    /// * `position_value_end` - Stop if the position value is greater than this value
-    /// 
-    /// # Returns
-    /// 
-    /// A vector of bytes
-    pub fn deserialize_range(&mut self, start: u64, end: u64, position_value_end: u64) -> PyResult<Vec<Row>> {
-
-        println!("Deserializing range: {} - {}, or until position value is greater than {}", start, end, position_value_end);
-
-        self.reader.seek(std::io::SeekFrom::Start(start))?;
-        
-        let mut rows = Vec::new();
-
-        let lambdas: Vec<_> = self.columns.iter().map(|column| {
-            match column.type_ {
-                ColumnType::Integer => {
-                    |reader: &mut RowReader| {
-                        let (value, len) = reader.read_zigzag_i64().unwrap();
-                        (CellValue::I64(value), len)
-                    }
-                },
-                ColumnType::Float => {
-                    |reader: &mut RowReader| (CellValue::F64(reader.read_f64().unwrap()), 8)
-                },
-                ColumnType::VolatileString => {
-                    |reader: &mut RowReader| {
-                        let string = match reader.read_string_u8() {
-                            Ok(string) => string,
-                            Err(e) => panic!("Reading string failed at position {:?}: {:?}",
-                                reader.reader.seek(std::io::SeekFrom::Current(0)).unwrap(), e),
-                        };
-                        let bytes_read = string.len() as usize + 1;
-                        (CellValue::String(string), bytes_read)
-                    }
-                },
-                ColumnType::HashtableString => {
-                    todo!("HashtableString has not been implemented yet!");
-                },
-            }
-        }).collect();
-
-        let mut current_pos = start;
-        'row_loop: loop {
-            if current_pos >= end {
-                break;
-            }
-
-            let mut cells = Vec::new();
-            let mut i = 0;
-            for lambda in &lambdas {
-                let (value, bytes_read) = lambda(self);
-
-                if i == 0 {
-                    match value {
-                        CellValue::I64(i) => {
-                            if i > position_value_end as i64 {
-                                break 'row_loop;
-                            }
-                        },
-                        _ => panic!("First column must be an integer"),
-                    }
-                }
-                i += 1;
-
-                cells.push(value);
-                current_pos += bytes_read as u64;
-            }
-            rows.push(Row { cells });
-        }
-
-        Ok(rows)
     }
 
     fn read_u64(&mut self) -> std::io::Result<u64> {
@@ -326,6 +277,118 @@ impl RowReader {
         let mut buf = vec![0; len];
         self.reader.read_exact(&mut buf)?;
         Ok(String::from_utf8(buf).map_err(|e| Error::new(ErrorKind::InvalidData, e))?)
+    }
+}
+
+#[pymethods]
+impl RowReader {
+    /// Query a range of rows from the database
+    /// 
+    /// # Arguments
+    /// 
+    /// * `position_value_start` - The start of the range (inclusive)
+    /// * `position_value_end` - The end of the range (exclusive)
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of rows
+    fn query_range(&mut self, position_value_start: u64, position_value_end: u64) -> Result<Vec<Row>, std::io::Error> {
+        let range: Vec<(u64, u64)> = self.index.get_range(position_value_start, position_value_end)?;
+
+        let start_offset = match range.first() {
+            Some((_position, offset)) => *offset,
+            None => return Ok(Vec::new()),
+        };
+
+        let rows = self.deserialize_range(
+            // Start at the first row
+            start_offset,
+            // Stop before we reach the start of the index, which is where
+            // the table data has ended (probably will not get there)
+            self.index.inner.index_start_offset,
+            // Stop at the end of the range
+            position_value_end,
+        )?;
+
+        Ok(rows)
+    }
+
+    /// Deserialize a range of bytes from the reader using raw offsets. Unless you know what you're doing, use `query_range` instead.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `offset_start` - The offset in the database to the start of the range (inclusive). This must be at the start of a row
+    /// * `offset_end` - The offset in the database to the end of the range (exclusive)
+    /// * `position_value_end` - Stop if the position value is greater than this value
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of bytes
+    pub fn deserialize_range(&mut self, offset_start: u64, offset_end: u64, position_value_end: u64) -> Result<Vec<Row>, std::io::Error> {
+        println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
+
+        self.reader.seek(std::io::SeekFrom::Start(offset_start))?;
+        
+        let mut rows = Vec::new();
+
+        let lambdas: Vec<_> = self.index.columns.iter().map(|column| {
+            match column.type_ {
+                ColumnType::Integer => {
+                    |reader: &mut RowReader| {
+                        let (value, len) = reader.read_zigzag_i64().unwrap();
+                        (CellValue::I64(value), len)
+                    }
+                },
+                ColumnType::Float => {
+                    |reader: &mut RowReader| (CellValue::F64(reader.read_f64().unwrap()), 8)
+                },
+                ColumnType::VolatileString => {
+                    |reader: &mut RowReader| {
+                        let string = match reader.read_string_u8() {
+                            Ok(string) => string,
+                            Err(e) => panic!("Reading string failed at position {:?}: {:?}",
+                                reader.reader.seek(std::io::SeekFrom::Current(0)).unwrap(), e),
+                        };
+                        let bytes_read = string.len() as usize + 1;
+                        (CellValue::String(string), bytes_read)
+                    }
+                },
+                ColumnType::HashtableString => {
+                    todo!("HashtableString has not been implemented yet!");
+                },
+            }
+        }).collect();
+
+        let mut current_pos = offset_start;
+        'row_loop: loop {
+            if current_pos >= offset_end {
+                break;
+            }
+
+            let mut cells = Vec::new();
+            let mut i = 0;
+            for lambda in &lambdas {
+                let (value, bytes_read) = lambda(self);
+
+                if i == 0 {
+                    match value {
+                        CellValue::I64(i) => {
+                            if i > position_value_end as i64 {
+                                break 'row_loop;
+                            }
+                        },
+                        _ => panic!("First column must be an integer"),
+                    }
+                }
+                i += 1;
+
+                cells.push(value);
+                current_pos += bytes_read as u64;
+            }
+            rows.push(Row { cells });
+        }
+
+        Ok(rows)
     }
 }
 
