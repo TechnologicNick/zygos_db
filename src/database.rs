@@ -205,6 +205,15 @@ impl Database {
     pub fn serialize_dataset(&self, bytes: &mut Vec<u8>, dataset: &Dataset, tables: Vec<Table>, ptr_to_index_locations: Vec<(u8, usize)>) -> Result<(), String> {
         for (table, (chromosome, ptr_to_index_location)) in tables.into_iter().zip(ptr_to_index_locations) {
             assert_eq!(table.chromosome, chromosome);
+
+            let max_position = match table.rows.last() {
+                Some(row) => match row.first() {
+                    Some(CellValue::Integer(i)) => *i,
+                    _ => return Err("First cell of the first row must be an integer".to_string()),
+                },
+                None => return Err("Table must have at least one row".to_string()),
+            };
+
             let position_indices = self.serialize_dataset_file(bytes, dataset, table.rows)?;
 
             // Update the location of the index in the header
@@ -212,7 +221,7 @@ impl Database {
             let index_size = 8;
             bytes.splice(ptr_to_index_location..ptr_to_index_location + index_size, index_offset.to_be_bytes().into_iter());
 
-            self.serialize_table_index(bytes, position_indices);
+            self.serialize_table_index(bytes, position_indices, max_position as usize);
         }
 
         Ok(())
@@ -259,8 +268,10 @@ impl Database {
         Ok(position_indices)
     }
 
-    fn serialize_table_index(&self, bytes: &mut Vec<u8>, indices: IndicesList) {
+    fn serialize_table_index(&self, bytes: &mut Vec<u8>, indices: IndicesList, max_position: usize) {
         bytes.extend_from_slice(INDEX_MAGIC);
+
+        bytes.extend_from_slice(&max_position.to_be_bytes());
         
         let ptr_to_end_offset = bytes.len();
         bytes.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // Placeholder for the offset of the end of the index

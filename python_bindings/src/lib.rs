@@ -195,6 +195,16 @@ impl TableIndex {
     }
 
     #[getter]
+    fn min_position(&self) -> u64 {
+        self.inner.inner.keys().next().copied().unwrap_or(0)
+    }
+
+    #[getter]
+    fn max_position(&self) -> u64 {
+        self.inner.max_position
+    }
+
+    #[getter]
     fn index_start_offset(&self) -> u64 {
         self.inner.index_start_offset
     }

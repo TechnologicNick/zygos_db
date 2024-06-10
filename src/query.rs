@@ -137,6 +137,8 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
             }
         }
 
+        let max_position = self.read_u64()?;
+
         let end_offset = self.read_u64()?;
         let num_indices = self.read_u64()?;
 
@@ -151,6 +153,7 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
 
         Ok(TableIndex{
             inner: res,
+            max_position,
             index_start_offset: offset,
             index_end_offset: end_offset,
         })
@@ -160,6 +163,8 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
 #[derive(Clone)]
 pub struct TableIndex {
     pub inner: BTreeMap<u64, u64>,
+    /// The maximum position in the index (inclusive)
+    pub max_position: u64,
     /// The offset in the file where the magic of the index is located
     pub index_start_offset: u64,
     /// The offset in the file where the index ends (exclusive)
