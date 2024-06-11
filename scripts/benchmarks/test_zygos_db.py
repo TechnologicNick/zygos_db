@@ -2,30 +2,43 @@ import time
 
 from zygos_db import DatabaseQueryClient
 
-import config as config
 from util import measure_time
+from config import Config
+from test_base import Test
 
-def run(config=config):
+class TestZygosDB(Test):
+    table_indices: dict[int, object] = {}
+    row_readers: dict[int, object] = {}
 
-    client = measure_time(lambda: DatabaseQueryClient(config.zygos_db_file), "Creating client")
-    print(client.header.datasets)
+    def __init__(self, config: Config):
+        super().__init__(config, "ZygosDB")
 
-    table_index = measure_time(lambda: client.read_table_index(config.zygos_db_dataset, config.query_chromosome), "Reading table index")
-    print(table_index)
+    def setup(self, chromosomes: list[int]):
+        client = measure_time(lambda: DatabaseQueryClient(self.config.zygos_db_file), f"[{self.name}] Creating client")
+        # print(client.header.datasets)
 
-    row_reader = measure_time(lambda: table_index.create_query(), "Creating row reader")
-    print(row_reader)
+        for chromosome in chromosomes:
+            table_index = measure_time(lambda: client.read_table_index(self.config.zygos_db_dataset, chromosome), f"[{self.name}] Reading table index for chromosome {chromosome}")
+            # print(table_index)
 
-    rows = measure_time(lambda: row_reader.query_range(config.query_start, config.query_end), "Querying rows")
-    print(rows[0:5])
-    print("...")
-    print(rows[-5:])
+            row_reader = table_index.create_query()
+            # print(row_reader)
 
-    print(len(rows))
+            self.table_indices[chromosome] = table_index
+            self.row_readers[chromosome] = row_reader
 
-    return rows
+    def run(self, queries):
+        total_rows = 0
 
-if __name__ == "__main__":
-    start = time.time()
-    rows = run()
-    print("Total time taken:", time.time() - start)
+        start_time = time.time()
+
+        for query in queries:
+            row_reader = self.row_readers[query.chromosome]
+            rows = row_reader.query_range(query.start, query.end)
+            total_rows += len(rows)
+
+        end_time = time.time()
+
+        print(f"[{self.name}] Querying {total_rows} rows took {end_time - start_time} seconds")
+
+        return total_rows

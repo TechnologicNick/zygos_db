@@ -6,5 +6,5 @@ T = TypeVar("T")
 def measure_time(func: Callable[..., T], description: str, *args, **kwargs) -> T:
     start = time()
     result = func(*args, **kwargs)
-    print(f"{description}:", time() - start)
+    print(f"{description}:", time() - start, "seconds")
     return result

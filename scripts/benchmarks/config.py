@@ -1,10 +1,35 @@
 from os.path import join, dirname, abspath
+import platform
 
-query_chromosome = 2
-input_file = join(dirname(abspath(__file__)), f"../../../snpXplorer/Data/databases/Alzheimer_million/chr{query_chromosome}_Alzheimer_million.txt.gz")
-zygos_db_file = join(dirname(abspath(__file__)), f"../../../snpXplorer/Data/databases/snpXplorer.zygosdb")
-zygos_db_dataset = "alzheimer"
-all_columns = [ "POS", "CHR", "P", "POS_HG38", "RSID", "MAF", "REF", "ALT"]
-query_columns = { "POS": int, "P": float, "RSID": str }
-query_start = 0
-query_end = 249172500
+from zygos_db import DatabaseQueryClient
+
+_dir = dirname(abspath(__file__))
+
+class Config:
+    zygos_db_dataset = "alzheimer"
+    all_columns = [ "POS", "CHR", "P", "POS_HG38", "RSID", "MAF", "REF", "ALT"]
+    query_columns = { "POS": int, "P": float, "RSID": str }
+
+    def __init__(self) -> None:
+        if any(platform.win32_ver()):
+            self.zygos_db_file = join(_dir, "../../../snpXplorer/Data/databases/snpXplorer.zygosdb")
+        else:
+            self.zygos_db_file = abspath("/home/nick/snpXplorer.zygosdb")
+        pass
+
+    def get_input_file(self, chromosome: int) -> str:
+        return join(_dir, f"../../../snpXplorer/Data/databases/Alzheimer_million/chr{chromosome}_Alzheimer_million.txt.gz")
+
+    def get_all_positions(self, chromosome: int) -> list[int]:
+        client = DatabaseQueryClient(self.zygos_db_file)
+        table_index = client.read_table_index(self.zygos_db_dataset, chromosome)
+        row_reader = table_index.create_query()
+
+        rows = row_reader.query_range(table_index.min_position, table_index.max_position)
+        return [row[0] for row in rows]
+
+    def get_all_chromosomes(self) -> list[int]:
+        client = DatabaseQueryClient(self.zygos_db_file)
+        dataset = [dataset for dataset in client.header.datasets if dataset.name == self.zygos_db_dataset][0]
+        return [table.chromosome for table in dataset.tables]
+

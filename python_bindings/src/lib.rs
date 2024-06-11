@@ -335,7 +335,7 @@ impl RowReader {
     /// 
     /// A vector of bytes
     pub fn deserialize_range(&mut self, offset_start: u64, offset_end: u64, position_value_end: u64) -> Result<Vec<Row>, std::io::Error> {
-        println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
+        // println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
 
         self.reader.seek(std::io::SeekFrom::Start(offset_start))?;
         
