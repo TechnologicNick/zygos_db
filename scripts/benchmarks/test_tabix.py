@@ -17,8 +17,9 @@ class TestTabix(Test):
             self.input_files[chromosome] = self.config.get_input_file(chromosome)
         
 
-    def run(self, queries):
+    def run(self, queries, duration):
         total_rows = 0
+        completed_queries = 0
 
         total_time_querying = 0
         total_time_decoding_string = 0
@@ -29,6 +30,9 @@ class TestTabix(Test):
 
         for query in queries:
             time_query_start = time.time()
+
+            if time_query_start - start_time > duration:
+                break
 
             cmd = ["tabix", self.input_files[query.chromosome], f"{query.chromosome}:{query.start}-{query.end}"]
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -78,6 +82,8 @@ class TestTabix(Test):
 
             total_rows += df.shape[0]
 
+            completed_queries += 1
+
         end_time = time.time()
 
         print(f"[{self.name}] Querying took {total_time_querying} seconds")
@@ -86,6 +92,9 @@ class TestTabix(Test):
         print(f"[{self.name}] Waiting took {total_time_waiting} seconds")
 
         print(f"[{self.name}] Querying {total_rows} rows took {end_time - start_time} seconds")
+
+        if completed_queries >= len(queries):
+            raise RuntimeError(f"[{self.name}] Completed all queries, increase num_samples or decrease duration.")
 
         return total_rows
 

@@ -27,18 +27,27 @@ class TestZygosDB(Test):
             self.table_indices[chromosome] = table_index
             self.row_readers[chromosome] = row_reader
 
-    def run(self, queries):
+    def run(self, queries, duration):
         total_rows = 0
+        completed_queries = 0
 
         start_time = time.time()
 
         for query in queries:
+            if time.time() - start_time > duration:
+                break
+
             row_reader = self.row_readers[query.chromosome]
             rows = row_reader.query_range(query.start, query.end)
             total_rows += len(rows)
 
+            completed_queries += 1
+
         end_time = time.time()
 
         print(f"[{self.name}] Querying {total_rows} rows took {end_time - start_time} seconds")
+
+        if completed_queries >= len(queries):
+            raise RuntimeError(f"[{self.name}] Completed all queries, increase num_samples or decrease duration.")
 
         return total_rows

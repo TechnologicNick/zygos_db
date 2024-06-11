@@ -18,7 +18,10 @@ class Config:
         pass
 
     def get_input_file(self, chromosome: int) -> str:
-        return join(_dir, f"../../../snpXplorer/Data/databases/Alzheimer_million/chr{chromosome}_Alzheimer_million.txt.gz")
+        if any(platform.win32_ver()):
+            return join(_dir, f"../../../snpXplorer/Data/databases/Alzheimer_million/chr{chromosome}_Alzheimer_million.txt.gz")
+        else:
+            return abspath(f"/home/nick/Alzheimer_million/chr{chromosome}_Alzheimer_million.txt.gz")
 
     def get_all_positions(self, chromosome: int) -> list[int]:
         client = DatabaseQueryClient(self.zygos_db_file)

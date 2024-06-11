@@ -19,5 +19,5 @@ class Test(ABC):
     def setup(self):
         pass
 
-    def run(self, queries: list[TestQuery]):
+    def run(self, queries: list[TestQuery], duration: float):
         pass

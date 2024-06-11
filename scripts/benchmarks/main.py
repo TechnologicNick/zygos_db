@@ -10,6 +10,8 @@ def draw_samples(positions_per_chromosome: dict[int, list[int]], window_size: in
     for _ in range(num_samples):
         chromosome = random.choice(list(positions_per_chromosome.keys()))
         positions = positions_per_chromosome[chromosome]
+
+        assert len(positions) > window_size, f"Chromosome {chromosome} has less positions than window size {window_size}: {len(positions)}"
         
         start_index = random.randint(0, len(positions) - window_size)
         end_index = start_index + window_size
@@ -21,7 +23,7 @@ def draw_samples(positions_per_chromosome: dict[int, list[int]], window_size: in
 
     return windows
 
-def run_benchmarks(tests: list[str], window_size: int, num_samples: int):
+def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duration: float):
     config = Config()
 
     print("[+] Reading all chromosomes...")
@@ -49,10 +51,15 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int):
         test.setup(chromosomes)
     
     for test in test_classes:
-        print(f"[{test.name}] Running...")
-        test.run(samples)
+        print(f"[{test.name}] Running for {duration} seconds...")
+
+        try:
+            test.run(samples, duration)
+        except RuntimeError as e:
+            print("ERROR:", e)
+            exit(1)
 
     pass
 
 if __name__ == "__main__":
-    run_benchmarks(tests=["tabix"], window_size=100000, num_samples=1000)
+    run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=10000, duration=10)
