@@ -1,3 +1,4 @@
+import math
 import random
 from config import Config
 from test_base import TestQuery
@@ -23,7 +24,7 @@ def draw_samples(positions_per_chromosome: dict[int, list[int]], window_size: in
 
     return windows
 
-def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duration: float):
+def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duration: float, warmup: float = 0.0):
     config = Config()
 
     print("[+] Reading all chromosomes...")
@@ -35,6 +36,9 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
 
     print(f"[+] Drawing {num_samples} samples of size {window_size}...")
     samples = draw_samples(positions_per_chromosome, window_size, num_samples)
+
+    print(f"[+] Drawing {math.ceil(num_samples * warmup / duration)} warmup samples...") if warmup > 0 else None
+    warmup_samples = draw_samples(positions_per_chromosome, window_size, math.ceil(num_samples * warmup / duration)) if warmup > 0 else []
     
     # for sample in samples:
     #     print(sample)
@@ -51,7 +55,16 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
         test.setup(chromosomes)
     
     for test in test_classes:
-        print(f"[{test.name}] Running for {duration} seconds...")
+        if warmup > 0:
+            print(f"[{test.name}] ===== Warming up for {warmup} seconds...")
+
+            try:
+                test.run(warmup_samples, warmup)
+            except RuntimeError as e:
+                print("ERROR during warmup:", e)
+                exit(1)
+
+        print(f"[{test.name}] ===== Running for {duration} seconds...")
 
         try:
             test.run(samples, duration)
@@ -62,4 +75,4 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
     pass
 
 if __name__ == "__main__":
-    run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=10000, duration=10)
+    run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=10000, duration=10, warmup=10)

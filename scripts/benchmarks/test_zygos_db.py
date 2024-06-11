@@ -46,6 +46,8 @@ class TestZygosDB(Test):
         end_time = time.time()
 
         print(f"[{self.name}] Querying {total_rows} rows took {end_time - start_time} seconds")
+        print(f"[{self.name}] Average time per query: {(end_time - start_time) / completed_queries}")
+        print(f"[{self.name}] Average rows per second: {total_rows / (end_time - start_time)}")
 
         if completed_queries >= len(queries):
             raise RuntimeError(f"[{self.name}] Completed all queries, increase num_samples or decrease duration.")
