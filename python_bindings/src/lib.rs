@@ -247,12 +247,14 @@ impl RowReader {
         })
     }
 
+    #[allow(dead_code)]
     fn read_u64(&mut self) -> std::io::Result<u64> {
         let mut buf = [0; size_of::<u64>()];
         self.reader.read_exact(&mut buf)?;
         Ok(u64::from_be_bytes(buf))
     }
 
+    #[allow(dead_code)]
     fn read_i64(&mut self) -> std::io::Result<i64> {
         let mut buf = [0; size_of::<i64>()];
         self.reader.read_exact(&mut buf)?;
@@ -288,6 +290,28 @@ impl RowReader {
         self.reader.read_exact(&mut buf)?;
         Ok(String::from_utf8(buf).map_err(|e| Error::new(ErrorKind::InvalidData, e))?)
     }
+
+    fn skip_zigzag_i64(&mut self) -> std::io::Result<()> {
+        let mut buf = [0u8; 9];
+        self.reader.read_exact(&mut buf[0..1])?;
+        let len = vint64::decoded_len(buf[0]);
+
+        self.reader.read_exact(&mut buf[1..len])?;
+        Ok(())
+    }
+
+    fn skip_f64(&mut self) -> std::io::Result<()> {
+        let mut buf = [0; size_of::<f64>()];
+        self.reader.read_exact(&mut buf)?;
+        Ok(())
+    }
+
+    fn skip_string_u8(&mut self) -> std::io::Result<()> {
+        let len: usize = self.read_u8()? as usize;
+        let mut buf = [0; u8::MAX as usize];
+        self.reader.read_exact(&mut buf[0..len])?;
+        Ok(())
+    }
 }
 
 #[pymethods]
@@ -316,6 +340,8 @@ impl RowReader {
             // Stop before we reach the start of the index, which is where
             // the table data has ended (probably will not get there)
             self.index.inner.index_start_offset,
+            // Start at the beginning of the range
+            position_value_start,
             // Stop at the end of the range
             position_value_end,
         )?;
@@ -334,14 +360,48 @@ impl RowReader {
     /// # Returns
     /// 
     /// A vector of bytes
-    pub fn deserialize_range(&mut self, offset_start: u64, offset_end: u64, position_value_end: u64) -> Result<Vec<Row>, std::io::Error> {
+    pub fn deserialize_range(
+        &mut self,
+        offset_start: u64,
+        offset_end: u64,
+        position_value_start: u64,
+        position_value_end: u64,
+    ) -> Result<Vec<Row>, std::io::Error> {
         // println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
 
         self.reader.seek(std::io::SeekFrom::Start(offset_start))?;
         
         let mut rows = Vec::new();
 
-        let lambdas: Vec<_> = self.index.columns.iter().map(|column| {
+        let skip_lambdas: Vec<_> = self.index.columns.iter()
+            .skip(1) // Skip the first position column, as we always want to read it
+            .map(|column| {
+                match column.type_ {
+                    ColumnType::Integer => {
+                        |reader: &mut RowReader| {
+                            reader.skip_zigzag_i64().unwrap();
+                            ()
+                        }
+                    },
+                    ColumnType::Float => {
+                        |reader: &mut RowReader| {
+                            reader.skip_f64().unwrap();
+                            ()
+                        }
+                    },
+                    ColumnType::VolatileString => {
+                        |reader: &mut RowReader| {
+                            reader.skip_string_u8().unwrap();
+                            ()
+                        }
+                    },
+                    ColumnType::HashtableString => {
+                        todo!("HashtableString has not been implemented yet!");
+                    },
+                }
+            }).collect();
+
+        let read_lambdas: Vec<_> = self.index.columns.iter().map(|column| {
             match column.type_ {
                 ColumnType::Integer => {
                     |reader: &mut RowReader| {
@@ -377,7 +437,7 @@ impl RowReader {
 
             let mut cells = Vec::new();
             let mut i = 0;
-            for lambda in &lambdas {
+            for lambda in &read_lambdas {
                 let (value, bytes_read) = lambda(self);
 
                 if i == 0 {
@@ -385,6 +445,12 @@ impl RowReader {
                         CellValue::I64(i) => {
                             if i > position_value_end as i64 {
                                 break 'row_loop;
+                            } else if i < position_value_start as i64 {
+                                // Skip this row
+                                for lambda in &skip_lambdas {
+                                    lambda(self);
+                                }
+                                continue 'row_loop;
                             }
                         },
                         _ => panic!("First column must be an integer"),
