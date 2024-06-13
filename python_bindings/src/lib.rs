@@ -269,7 +269,14 @@ impl RowReader {
         self.reader.read_exact(&mut buf[1..len])?;
         let mut slice = &buf[..len];
 
-        Ok((vint64::signed::decode(&mut slice).unwrap(), len))
+        let res = vint64::signed::decode(&mut slice)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, format!(
+                "Failed to decode zigzag i64 at position {:?}: {:?}",
+                self.reader.seek(std::io::SeekFrom::Current(0)).unwrap(),
+                e,
+            )))?;
+        
+        Ok((res, len))
     }
 
     fn read_u8(&mut self) -> std::io::Result<u8> {
@@ -291,26 +298,26 @@ impl RowReader {
         Ok(String::from_utf8(buf).map_err(|e| Error::new(ErrorKind::InvalidData, e))?)
     }
 
-    fn skip_zigzag_i64(&mut self) -> std::io::Result<()> {
+    fn skip_zigzag_i64(&mut self) -> std::io::Result<usize> {
         let mut buf = [0u8; 9];
         self.reader.read_exact(&mut buf[0..1])?;
         let len = vint64::decoded_len(buf[0]);
 
         self.reader.read_exact(&mut buf[1..len])?;
-        Ok(())
+        Ok(len)
     }
 
-    fn skip_f64(&mut self) -> std::io::Result<()> {
+    fn skip_f64(&mut self) -> std::io::Result<usize> {
         let mut buf = [0; size_of::<f64>()];
         self.reader.read_exact(&mut buf)?;
-        Ok(())
+        Ok(size_of::<f64>())
     }
 
-    fn skip_string_u8(&mut self) -> std::io::Result<()> {
+    fn skip_string_u8(&mut self) -> std::io::Result<usize> {
         let len: usize = self.read_u8()? as usize;
         let mut buf = [0; u8::MAX as usize];
         self.reader.read_exact(&mut buf[0..len])?;
-        Ok(())
+        Ok(1 + len)
     }
 }
 
@@ -379,20 +386,17 @@ impl RowReader {
                 match column.type_ {
                     ColumnType::Integer => {
                         |reader: &mut RowReader| {
-                            reader.skip_zigzag_i64().unwrap();
-                            ()
+                            reader.skip_zigzag_i64().unwrap()
                         }
                     },
                     ColumnType::Float => {
                         |reader: &mut RowReader| {
-                            reader.skip_f64().unwrap();
-                            ()
+                            reader.skip_f64().unwrap()
                         }
                     },
                     ColumnType::VolatileString => {
                         |reader: &mut RowReader| {
-                            reader.skip_string_u8().unwrap();
-                            ()
+                            reader.skip_string_u8().unwrap()
                         }
                     },
                     ColumnType::HashtableString => {
@@ -405,22 +409,24 @@ impl RowReader {
             match column.type_ {
                 ColumnType::Integer => {
                     |reader: &mut RowReader| {
-                        let (value, len) = reader.read_zigzag_i64().unwrap();
-                        (CellValue::I64(value), len)
+                        let (value, len) = reader.read_zigzag_i64()?;
+                        Ok((CellValue::I64(value), len))
                     }
                 },
                 ColumnType::Float => {
-                    |reader: &mut RowReader| (CellValue::F64(reader.read_f64().unwrap()), 8)
+                    |reader: &mut RowReader| Ok((CellValue::F64(reader.read_f64()?), 8))
                 },
                 ColumnType::VolatileString => {
                     |reader: &mut RowReader| {
                         let string = match reader.read_string_u8() {
                             Ok(string) => string,
-                            Err(e) => panic!("Reading string failed at position {:?}: {:?}",
-                                reader.reader.seek(std::io::SeekFrom::Current(0)).unwrap(), e),
+                            Err(e) => return Err(Error::new(ErrorKind::InvalidData, format!(
+                                "Reading string failed at position {:?}: {:?}",
+                                reader.reader.seek(std::io::SeekFrom::Current(0)).unwrap(), e
+                            ))),
                         };
                         let bytes_read = string.len() as usize + 1;
-                        (CellValue::String(string), bytes_read)
+                        Ok((CellValue::String(string), bytes_read))
                     }
                 },
                 ColumnType::HashtableString => {
@@ -438,7 +444,12 @@ impl RowReader {
             let mut cells = Vec::new();
             let mut i = 0;
             for lambda in &read_lambdas {
-                let (value, bytes_read) = lambda(self);
+                let (value, bytes_read) = lambda(self).map_err(|e| Error::new(ErrorKind::InvalidData, format!(
+                    "Failed to read column {} of after successfully reading row at position {:?} of chromosome {:?}, before stopping at {:?}: {:?}",
+                    i, current_pos, self.index.chromosome, offset_end, e,
+                )))?;
+
+                current_pos += bytes_read as u64;
 
                 if i == 0 {
                     match value {
@@ -448,7 +459,8 @@ impl RowReader {
                             } else if i < position_value_start as i64 {
                                 // Skip this row
                                 for lambda in &skip_lambdas {
-                                    lambda(self);
+                                    let bytes_skipped = lambda(self);
+                                    current_pos += bytes_skipped as u64;
                                 }
                                 continue 'row_loop;
                             }
@@ -459,7 +471,6 @@ impl RowReader {
                 i += 1;
 
                 cells.push(value);
-                current_pos += bytes_read as u64;
             }
             rows.push(Row { cells });
         }
