@@ -15,7 +15,7 @@ def draw_samples(positions_per_chromosome: dict[int, list[int]], window_size: in
         assert len(positions) > window_size, f"Chromosome {chromosome} has less positions than window size {window_size}: {len(positions)}"
         
         start_index = random.randint(0, len(positions) - window_size)
-        end_index = start_index + window_size
+        end_index = start_index + window_size - 1
 
         start = positions[start_index]
         end = positions[end_index]
@@ -53,13 +53,17 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
     for test in test_classes:
         print(f"[{test.name}] Setting up...")
         test.setup(chromosomes)
+
+    warmup_throughput = dict()
+    test_throughput = dict()
     
     for test in test_classes:
         if warmup > 0:
             print(f"[{test.name}] ===== Warming up for {warmup} seconds...")
 
             try:
-                test.run(warmup_samples, warmup)
+                throughput = test.run(warmup_samples, warmup)
+                warmup_throughput[test.name] = throughput
             except RuntimeError as e:
                 print("ERROR during warmup:", e)
                 exit(1)
@@ -67,12 +71,25 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
         print(f"[{test.name}] ===== Running for {duration} seconds...")
 
         try:
-            test.run(samples, duration)
+            throughput = test.run(samples, duration)
+            test_throughput[test.name] = throughput
         except RuntimeError as e:
             print("ERROR:", e)
             exit(1)
 
-    pass
+    return (warmup_throughput, test_throughput)
 
 if __name__ == "__main__":
-    run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=10000, duration=10, warmup=10)
+    results = []
+    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1, num_samples=6000000, duration=60, warmup=10))
+    print(results)
+    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10, num_samples=6000000, duration=60, warmup=10))
+    print(results)
+    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100, num_samples=3000000, duration=60, warmup=10))
+    print(results)
+    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1000, num_samples=1000000, duration=60, warmup=10))
+    print(results)
+    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10000, num_samples=1000000, duration=60, warmup=10))
+    print(results)
+    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=1000000, duration=60, warmup=10))
+    print(results)

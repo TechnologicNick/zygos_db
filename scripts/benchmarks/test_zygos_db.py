@@ -37,9 +37,13 @@ class TestZygosDB(Test):
             if time.time() - start_time > duration:
                 break
 
-            row_reader = self.row_readers[query.chromosome]
-            rows = row_reader.query_range(query.start, query.end)
-            total_rows += len(rows)
+            try:
+                row_reader = self.row_readers[query.chromosome]
+                rows = row_reader.query_range(query.start, query.end)
+                total_rows += len(rows)
+            except Exception as e:
+                print(f"[{self.name}] Error executing query {query}: {e}")
+                raise e
 
             completed_queries += 1
 
@@ -52,4 +56,4 @@ class TestZygosDB(Test):
         if completed_queries >= len(queries):
             raise RuntimeError(f"[{self.name}] Completed all queries, increase num_samples or decrease duration.")
 
-        return total_rows
+        return total_rows / (end_time - start_time)

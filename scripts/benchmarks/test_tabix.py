@@ -98,5 +98,5 @@ class TestTabix(Test):
         if completed_queries >= len(queries):
             raise RuntimeError(f"[{self.name}] Completed all queries, increase num_samples or decrease duration.")
 
-        return total_rows
+        return total_rows / (end_time - start_time)
 
