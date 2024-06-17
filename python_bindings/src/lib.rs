@@ -265,7 +265,7 @@ impl RowReader {
         position_value_start: u64,
         position_value_end: u64,
     ) -> Result<Vec<Row>, std::io::Error> {
-        // println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
+        // println!("Deserializing range: {} - {}", position_value_start, position_value_end);
 
         let offset_start: u64 = 0;
         let offset_end = bytes.len() as u64;
@@ -395,7 +395,7 @@ impl RowReader {
         self.reader.seek(std::io::SeekFrom::Start(start_offset))?;
 
         // Append the end of the index to the range
-        range.push((position_value_end, self.index.inner.index_end_offset));
+        range.push((position_value_end, self.index.inner.index_start_offset));
 
         let blocks = range.windows(2).map(|window| {
             let [start, end] = window else { unreachable!() };
@@ -404,7 +404,7 @@ impl RowReader {
 
         let mut compressed: Vec<u8> = Vec::new();
         let mut decompressed: Vec<u8> = Vec::new();
-        let decompressor = RowDecompressor::new(CompressionAlgorithm::Gzip);
+        let decompressor = RowDecompressor::new(CompressionAlgorithm::None);
 
         let mut rows = Vec::new();
         for (start, end) in blocks {

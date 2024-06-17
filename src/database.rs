@@ -230,7 +230,7 @@ impl Database {
 
                 let mut row_compressor = RowCompressor::new();
                 self.serialize_dataset_block(&mut row_compressor.buffer, dataset, chunk, i_block)?;
-                let compressed_size = row_compressor.compress(CompressionAlgorithm::Gzip, bytes).map_err(|e| e.to_string())?;
+                let compressed_size = row_compressor.compress(CompressionAlgorithm::None, bytes).map_err(|e| e.to_string())?;
 
                 println!("Block {} ({} rows) compressed from {} to {}", i_block, chunk.len(), row_compressor.buffer.len(), compressed_size);
 

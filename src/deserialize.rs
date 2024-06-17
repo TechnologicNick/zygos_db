@@ -25,8 +25,8 @@ pub fn read_zigzag_i64(cursor: &mut Cursor<&[u8]>) -> std::io::Result<(i64, usiz
 
     let res = vint64::signed::decode(&mut slice)
         .map_err(|e| Error::new(ErrorKind::InvalidData, format!(
-            "Failed to decode zigzag i64: {:?}",
-            e,
+            "Failed to decode zigzag i64 (len={:?}, buf={:?}): {:?}",
+            len, tmp, e,
         )))?;
     
     Ok((res, len))
