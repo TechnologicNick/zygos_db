@@ -261,7 +261,7 @@ impl RowReader {
     /// A vector of bytes
     pub fn deserialize_range(
         &mut self,
-        bytes: &mut [u8],
+        bytes: &[u8],
         position_value_start: u64,
         position_value_end: u64,
     ) -> Result<Vec<Row>, std::io::Error> {
@@ -411,17 +411,17 @@ impl RowReader {
             compressed.clear();
             self.reader.by_ref().take(end.1 - start.1).read_to_end(&mut compressed)?;
 
-            match decompressor.decompress(&compressed, &mut decompressed) {
-                Ok(_) => {},
+            let slice = match decompressor.decompress(&compressed, &mut decompressed) {
+                Ok(res) => res,
                 Err(e) => {
                     eprintln!("Decompression failed: {:?}", e);
                     rhexdump!(&compressed[..], start.1);
                     return Err(e);
                 },
-            }
+            };
 
             let rows_in_block = self.deserialize_range(
-                &mut decompressed,
+                &slice,
                 start.0,
                 end.0,
             )?;

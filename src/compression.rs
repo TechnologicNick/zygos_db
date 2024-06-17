@@ -44,18 +44,16 @@ impl RowDecompressor {
         }
     }
 
-    pub fn decompress(&self, bytes: &[u8], buffer: &mut Vec<u8>) -> std::io::Result<usize> {
+    pub fn decompress<'a>(&self, bytes: &'a [u8], buffer: &'a mut Vec<u8>) -> std::io::Result<&'a [u8]> {
         match self.algorithm {
             CompressionAlgorithm::None => {
-                buffer.clear();
-                buffer.extend_from_slice(bytes);
-                Ok(bytes.len())
+                Ok(bytes)
             }
             CompressionAlgorithm::Gzip => {
                 let mut decoder = flate2::read::GzDecoder::new(bytes);
                 buffer.clear();
                 decoder.read_to_end(buffer)?;
-                Ok(buffer.len())
+                Ok(buffer.as_slice())
             }
         }
     }
