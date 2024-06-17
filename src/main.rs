@@ -1,6 +1,7 @@
 mod tsv_reader;
 mod config;
 mod database;
+mod compression;
 
 use std::path::PathBuf;
 

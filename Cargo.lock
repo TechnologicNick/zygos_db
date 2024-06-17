@@ -444,6 +444,7 @@ name = "python_bindings"
 version = "0.1.0"
 dependencies = [
  "pyo3",
+ "rhexdump",
  "vint64",
  "zygos_db",
 ]
@@ -485,6 +486,12 @@ checksum = "469052894dcb553421e483e4209ee581a45100d31b4018de03e5a7ad86374a7e"
 dependencies = [
  "bitflags",
 ]
+
+[[package]]
+name = "rhexdump"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a92cbe1a3dd221e3777fef339115d3b85e17a538668e03a0f3ae9c6a98351c7"
 
 [[package]]
 name = "scopeguard"

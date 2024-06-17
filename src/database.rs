@@ -6,6 +6,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 
 use crate::config::{Column, Config, Dataset};
 use crate::tsv_reader::{CellValue, TabSeparatedFileReader};
+use crate::compression::{CompressionAlgorithm, RowCompressor};
 
 pub const HEADER_MAGIC: &[u8] = b"ZygosDB";
 pub const HEADER_VERSION: u8 = 1;
@@ -214,7 +215,28 @@ impl Database {
                 None => return Err("Table must have at least one row".to_string()),
             };
 
-            let position_indices = self.serialize_dataset_file(bytes, dataset, table.rows)?;
+            // Map of position (first column) to offset in the file
+            let mut position_indices: Vec<(usize, usize)> = Vec::new();
+
+            for (i_block, chunk) in table.rows.chunks(dataset.rows_per_index).enumerate() {
+                let offset_block_start = bytes.len();
+                let first_position = match chunk.first() {
+                    Some(row) => match row.first() {
+                        Some(CellValue::Integer(i)) => *i as usize,
+                        _ => return Err("First cell of the first row must be an integer".to_string()),
+                    },
+                    None => return Err("Table must have at least one row".to_string()),
+                };
+
+                let mut row_compressor = RowCompressor::new();
+                self.serialize_dataset_block(&mut row_compressor.buffer, dataset, chunk, i_block)?;
+                let compressed_size = row_compressor.compress(CompressionAlgorithm::Gzip, bytes).map_err(|e| e.to_string())?;
+
+                println!("Block {} ({} rows) compressed from {} to {}", i_block, chunk.len(), row_compressor.buffer.len(), compressed_size);
+
+
+                position_indices.push((first_position, offset_block_start));
+            }
 
             // Update the location of the index in the header
             let index_offset = bytes.len();
@@ -227,20 +249,17 @@ impl Database {
         Ok(())
     }
 
-    fn serialize_dataset_file(&self, bytes: &mut Vec<u8>, dataset: &Dataset, rows: Vec<Row>) -> Result<IndicesList, String> {
-        // Map of position (first column) to offset in the file
-        let mut position_indices: Vec<(usize, usize)> = Vec::new();
-
+    fn serialize_dataset_block(&self, bytes: &mut Vec<u8>, dataset: &Dataset, rows: &[Row], i_block: usize) -> Result<(), String> {
         for (i_row, row) in rows.iter().enumerate() {
             for (i_col, cell) in row.iter().enumerate() {
                 match cell {
                     CellValue::Integer(i) => {
                         if i_col == 0 {
                             if *i < 0 {
-                                return Err(format!("Position must be a positive integer (column {:?}, row {})", dataset.columns[i_col].name, i_row));
-                            }
-                            if i_row % dataset.rows_per_index == 0 {
-                                position_indices.push((*i as usize, bytes.len()));
+                                return Err(format!(
+                                    "Position must be a positive integer (column {:?}, row {})",
+                                    dataset.columns[i_col].name, i_block * dataset.rows_per_index + i_row
+                                ));
                             }
                         }
 
@@ -255,7 +274,10 @@ impl Database {
                         let s_len = s_bytes.len();
 
                         if s_len > 255 {
-                            return Err(format!("Strings longer than 255 bytes are currently not supported (column {:?}, row {})", dataset.columns[i_col].name, i_row));
+                            return Err(
+                                format!("Strings longer than 255 bytes are currently not supported (column {:?}, row {})",
+                                dataset.columns[i_col].name, i_block * dataset.rows_per_index + i_row
+                            ));
                         }
 
                         bytes.push(s_len as u8);
@@ -265,7 +287,7 @@ impl Database {
             }
         }
 
-        Ok(position_indices)
+        Ok(())
     }
 
     fn serialize_table_index(&self, bytes: &mut Vec<u8>, indices: IndicesList, max_position: usize) {

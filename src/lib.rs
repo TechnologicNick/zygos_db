@@ -7,3 +7,5 @@ mod database;
 
 pub mod query;
 pub use tsv_reader::ColumnType;
+pub mod compression;
+pub mod deserialize;

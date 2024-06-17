@@ -1,9 +1,10 @@
 #![feature(btree_cursors)]
 
-use std::{fs::{File, OpenOptions}, io::{BufReader, Error, ErrorKind, Read, Seek}, path::PathBuf};
+use std::{fs::{File, OpenOptions}, io::{BufReader, Cursor, Error, ErrorKind, Read, Seek}, path::PathBuf};
 
 use pyo3::prelude::*;
-use zygos_db::ColumnType;
+use zygos_db::{compression::{CompressionAlgorithm, RowDecompressor}, deserialize, ColumnType};
+use rhexdump::prelude::*;
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -247,78 +248,129 @@ impl RowReader {
         })
     }
 
-    #[allow(dead_code)]
-    fn read_u64(&mut self) -> std::io::Result<u64> {
-        let mut buf = [0; size_of::<u64>()];
-        self.reader.read_exact(&mut buf)?;
-        Ok(u64::from_be_bytes(buf))
+    /// Deserialize a range of bytes from the reader using raw offsets. Unless you know what you're doing, use `query_range` instead.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `bytes` - The bytes to deserialize
+    /// * `position_value_start` - Skip rows until the position value is greater than or equal to this value
+    /// * `position_value_end` - Stop if the position value is greater than this value
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of bytes
+    pub fn deserialize_range(
+        &mut self,
+        bytes: &mut [u8],
+        position_value_start: u64,
+        position_value_end: u64,
+    ) -> Result<Vec<Row>, std::io::Error> {
+        // println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
+
+        let offset_start: u64 = 0;
+        let offset_end = bytes.len() as u64;
+
+        let mut cursor: Cursor<&[u8]> = Cursor::new(bytes);
+
+        let mut rows = Vec::new();
+
+        let skip_lambdas: Vec<_> = self.index.columns.iter()
+            .skip(1) // Skip the first position column, as we always want to read it
+            .map(|column| {
+                match column.type_ {
+                    ColumnType::Integer => {
+                        |cursor: &mut Cursor<&[u8]>| {
+                            deserialize::skip_zigzag_i64(cursor).unwrap()
+                        }
+                    },
+                    ColumnType::Float => {
+                        |cursor: &mut Cursor<&[u8]>| {
+                            deserialize::skip_f64(cursor).unwrap()
+                        }
+                    },
+                    ColumnType::VolatileString => {
+                        |cursor: &mut Cursor<&[u8]>| {
+                            deserialize::skip_string_u8(cursor).unwrap()
+                        }
+                    },
+                    ColumnType::HashtableString => {
+                        todo!("HashtableString has not been implemented yet!");
+                    },
+                }
+            }).collect();
+
+        let read_lambdas: Vec<_> = self.index.columns.iter().map(|column| {
+            match column.type_ {
+                ColumnType::Integer => {
+                    |cursor: &mut Cursor<&[u8]>| {
+                        let (value, len) = deserialize::read_zigzag_i64(cursor)?;
+                        Ok((CellValue::I64(value), len))
+                    }
+                },
+                ColumnType::Float => {
+                    |cursor: &mut Cursor<&[u8]>| Ok((CellValue::F64(deserialize::read_f64(cursor)?), 8))
+                },
+                ColumnType::VolatileString => {
+                    |cursor: &mut Cursor<&[u8]>| {
+                        let string = match deserialize::read_string_u8(cursor) {
+                            Ok(string) => string,
+                            Err(e) => return Err(Error::new(ErrorKind::InvalidData, format!(
+                                "Reading string failed: {:?}", e
+                            ))),
+                        };
+                        let bytes_read = string.len() as usize + 1;
+                        Ok((CellValue::String(string), bytes_read))
+                    }
+                },
+                ColumnType::HashtableString => {
+                    todo!("HashtableString has not been implemented yet!");
+                },
+            }
+        }).collect();
+
+        let mut offset_in_block = offset_start;
+        'row_loop: loop {
+            if offset_in_block >= offset_end {
+                break;
+            }
+
+            let mut cells = Vec::new();
+            let mut i = 0;
+            for lambda in &read_lambdas {
+                let (value, bytes_read) = lambda(&mut cursor).map_err(|e| Error::new(ErrorKind::InvalidData, format!(
+                    "Failed to read column {} of after successfully reading row at position {:?} of chromosome {:?}, before stopping at {:?}: {:?}",
+                    i, offset_in_block, self.index.chromosome, offset_end, e,
+                )))?;
+
+                offset_in_block += bytes_read as u64;
+
+                if i == 0 {
+                    match value {
+                        CellValue::I64(i) => {
+                            if i > position_value_end as i64 {
+                                break 'row_loop;
+                            } else if i < position_value_start as i64 {
+                                // Skip this row
+                                for lambda in &skip_lambdas {
+                                    let bytes_skipped = lambda(&mut cursor);
+                                    offset_in_block += bytes_skipped as u64;
+                                }
+                                continue 'row_loop;
+                            }
+                        },
+                        _ => panic!("First column must be an integer"),
+                    }
+                }
+                i += 1;
+
+                cells.push(value);
+            }
+            rows.push(Row { cells });
+        }
+
+        Ok(rows)
     }
 
-    #[allow(dead_code)]
-    fn read_i64(&mut self) -> std::io::Result<i64> {
-        let mut buf = [0; size_of::<i64>()];
-        self.reader.read_exact(&mut buf)?;
-        Ok(i64::from_be_bytes(buf))
-    }
-
-    fn read_zigzag_i64(&mut self) -> std::io::Result<(i64, usize)> {
-        let mut buf = [0u8; 9];
-        self.reader.read_exact(&mut buf[0..1])?;
-        let len = vint64::decoded_len(buf[0]);
-
-        self.reader.read_exact(&mut buf[1..len])?;
-        let mut slice = &buf[..len];
-
-        let res = vint64::signed::decode(&mut slice)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, format!(
-                "Failed to decode zigzag i64 at position {:?}: {:?}",
-                self.reader.seek(std::io::SeekFrom::Current(0)).unwrap(),
-                e,
-            )))?;
-        
-        Ok((res, len))
-    }
-
-    fn read_u8(&mut self) -> std::io::Result<u8> {
-        let mut buf = [0; size_of::<u8>()];
-        self.reader.read_exact(&mut buf)?;
-        Ok(buf[0])
-    }
-
-    fn read_f64(&mut self) -> std::io::Result<f64> {
-        let mut buf = [0; size_of::<f64>()];
-        self.reader.read_exact(&mut buf)?;
-        Ok(f64::from_be_bytes(buf))
-    }
-
-    fn read_string_u8(&mut self) -> std::io::Result<String> {
-        let len: usize = self.read_u8()? as usize;
-        let mut buf = vec![0; len];
-        self.reader.read_exact(&mut buf)?;
-        Ok(String::from_utf8(buf).map_err(|e| Error::new(ErrorKind::InvalidData, e))?)
-    }
-
-    fn skip_zigzag_i64(&mut self) -> std::io::Result<usize> {
-        let mut buf = [0u8; 9];
-        self.reader.read_exact(&mut buf[0..1])?;
-        let len = vint64::decoded_len(buf[0]);
-
-        self.reader.read_exact(&mut buf[1..len])?;
-        Ok(len)
-    }
-
-    fn skip_f64(&mut self) -> std::io::Result<usize> {
-        let mut buf = [0; size_of::<f64>()];
-        self.reader.read_exact(&mut buf)?;
-        Ok(size_of::<f64>())
-    }
-
-    fn skip_string_u8(&mut self) -> std::io::Result<usize> {
-        let len: usize = self.read_u8()? as usize;
-        let mut buf = [0; u8::MAX as usize];
-        self.reader.read_exact(&mut buf[0..len])?;
-        Ok(1 + len)
-    }
 }
 
 #[pymethods]
@@ -334,145 +386,46 @@ impl RowReader {
     /// 
     /// A vector of rows
     fn query_range(&mut self, position_value_start: u64, position_value_end: u64) -> Result<Vec<Row>, std::io::Error> {
-        let range: Vec<(u64, u64)> = self.index.get_range(position_value_start, position_value_end)?;
+        let mut range: Vec<(u64, u64)> = self.index.get_range(position_value_start, position_value_end)?;
 
         let start_offset = match range.first() {
             Some((_position, offset)) => *offset,
             None => return Ok(Vec::new()),
         };
+        self.reader.seek(std::io::SeekFrom::Start(start_offset))?;
 
-        let rows = self.deserialize_range(
-            // Start at the first row
-            start_offset,
-            // Stop before we reach the start of the index, which is where
-            // the table data has ended (probably will not get there)
-            self.index.inner.index_start_offset,
-            // Start at the beginning of the range
-            position_value_start,
-            // Stop at the end of the range
-            position_value_end,
-        )?;
+        // Append the end of the index to the range
+        range.push((position_value_end, self.index.inner.index_end_offset));
 
-        Ok(rows)
-    }
+        let blocks = range.windows(2).map(|window| {
+            let [start, end] = window else { unreachable!() };
+            (start, end)
+        });
 
-    /// Deserialize a range of bytes from the reader using raw offsets. Unless you know what you're doing, use `query_range` instead.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `offset_start` - The offset in the database to the start of the range (inclusive). This must be at the start of a row
-    /// * `offset_end` - The offset in the database to the end of the range (exclusive)
-    /// * `position_value_end` - Stop if the position value is greater than this value
-    /// 
-    /// # Returns
-    /// 
-    /// A vector of bytes
-    pub fn deserialize_range(
-        &mut self,
-        offset_start: u64,
-        offset_end: u64,
-        position_value_start: u64,
-        position_value_end: u64,
-    ) -> Result<Vec<Row>, std::io::Error> {
-        // println!("Deserializing range: {} - {}, or until position value is greater than {}", offset_start, offset_end, position_value_end);
+        let mut compressed: Vec<u8> = Vec::new();
+        let mut decompressed: Vec<u8> = Vec::new();
+        let decompressor = RowDecompressor::new(CompressionAlgorithm::Gzip);
 
-        self.reader.seek(std::io::SeekFrom::Start(offset_start))?;
-        
         let mut rows = Vec::new();
+        for (start, end) in blocks {
+            compressed.clear();
+            self.reader.by_ref().take(end.1 - start.1).read_to_end(&mut compressed)?;
 
-        let skip_lambdas: Vec<_> = self.index.columns.iter()
-            .skip(1) // Skip the first position column, as we always want to read it
-            .map(|column| {
-                match column.type_ {
-                    ColumnType::Integer => {
-                        |reader: &mut RowReader| {
-                            reader.skip_zigzag_i64().unwrap()
-                        }
-                    },
-                    ColumnType::Float => {
-                        |reader: &mut RowReader| {
-                            reader.skip_f64().unwrap()
-                        }
-                    },
-                    ColumnType::VolatileString => {
-                        |reader: &mut RowReader| {
-                            reader.skip_string_u8().unwrap()
-                        }
-                    },
-                    ColumnType::HashtableString => {
-                        todo!("HashtableString has not been implemented yet!");
-                    },
-                }
-            }).collect();
-
-        let read_lambdas: Vec<_> = self.index.columns.iter().map(|column| {
-            match column.type_ {
-                ColumnType::Integer => {
-                    |reader: &mut RowReader| {
-                        let (value, len) = reader.read_zigzag_i64()?;
-                        Ok((CellValue::I64(value), len))
-                    }
-                },
-                ColumnType::Float => {
-                    |reader: &mut RowReader| Ok((CellValue::F64(reader.read_f64()?), 8))
-                },
-                ColumnType::VolatileString => {
-                    |reader: &mut RowReader| {
-                        let string = match reader.read_string_u8() {
-                            Ok(string) => string,
-                            Err(e) => return Err(Error::new(ErrorKind::InvalidData, format!(
-                                "Reading string failed at position {:?}: {:?}",
-                                reader.reader.seek(std::io::SeekFrom::Current(0)).unwrap(), e
-                            ))),
-                        };
-                        let bytes_read = string.len() as usize + 1;
-                        Ok((CellValue::String(string), bytes_read))
-                    }
-                },
-                ColumnType::HashtableString => {
-                    todo!("HashtableString has not been implemented yet!");
+            match decompressor.decompress(&compressed, &mut decompressed) {
+                Ok(_) => {},
+                Err(e) => {
+                    eprintln!("Decompression failed: {:?}", e);
+                    rhexdump!(&compressed[..], start.1);
+                    return Err(e);
                 },
             }
-        }).collect();
 
-        let mut current_pos = offset_start;
-        'row_loop: loop {
-            if current_pos >= offset_end {
-                break;
-            }
-
-            let mut cells = Vec::new();
-            let mut i = 0;
-            for lambda in &read_lambdas {
-                let (value, bytes_read) = lambda(self).map_err(|e| Error::new(ErrorKind::InvalidData, format!(
-                    "Failed to read column {} of after successfully reading row at position {:?} of chromosome {:?}, before stopping at {:?}: {:?}",
-                    i, current_pos, self.index.chromosome, offset_end, e,
-                )))?;
-
-                current_pos += bytes_read as u64;
-
-                if i == 0 {
-                    match value {
-                        CellValue::I64(i) => {
-                            if i > position_value_end as i64 {
-                                break 'row_loop;
-                            } else if i < position_value_start as i64 {
-                                // Skip this row
-                                for lambda in &skip_lambdas {
-                                    let bytes_skipped = lambda(self);
-                                    current_pos += bytes_skipped as u64;
-                                }
-                                continue 'row_loop;
-                            }
-                        },
-                        _ => panic!("First column must be an integer"),
-                    }
-                }
-                i += 1;
-
-                cells.push(value);
-            }
-            rows.push(Row { cells });
+            let rows_in_block = self.deserialize_range(
+                &mut decompressed,
+                start.0,
+                end.0,
+            )?;
+            rows.extend(rows_in_block);
         }
 
         Ok(rows)
