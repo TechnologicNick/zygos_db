@@ -264,15 +264,14 @@ impl RowReader {
         bytes: &[u8],
         position_value_start: u64,
         position_value_end: u64,
-    ) -> Result<Vec<Row>, std::io::Error> {
+        out_rows: &mut Vec<Row>,
+    ) -> std::io::Result<()> {
         // println!("Deserializing range: {} - {}", position_value_start, position_value_end);
 
         let offset_start: u64 = 0;
         let offset_end = bytes.len() as u64;
 
         let mut cursor: Cursor<&[u8]> = Cursor::new(bytes);
-
-        let mut rows = Vec::new();
 
         let skip_lambdas: Vec<_> = self.index.columns.iter()
             .skip(1) // Skip the first position column, as we always want to read it
@@ -365,10 +364,10 @@ impl RowReader {
 
                 cells.push(value);
             }
-            rows.push(Row { cells });
+            out_rows.push(Row { cells });
         }
 
-        Ok(rows)
+        Ok(())
     }
 
 }
@@ -420,12 +419,12 @@ impl RowReader {
                 },
             };
 
-            let rows_in_block = self.deserialize_range(
+            self.deserialize_range(
                 &slice,
                 start.0,
                 end.0,
+                &mut rows,
             )?;
-            rows.extend(rows_in_block);
         }
 
         Ok(rows)
