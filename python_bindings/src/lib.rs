@@ -20,6 +20,7 @@ pub struct DatabaseHeader {
 pub struct DatasetHeader {
     #[pyo3(get)]
     pub name: String,
+    pub compression_algorithm: CompressionAlgorithm,
     #[pyo3(get)]
     pub columns: Vec<ColumnHeader>,
     #[pyo3(get)]
@@ -56,6 +57,7 @@ impl From<zygos_db::query::DatasetHeader> for DatasetHeader {
     fn from(header: zygos_db::query::DatasetHeader) -> Self {
         Self {
             name: header.name,
+            compression_algorithm: header.compression_algorithm,
             columns: header.columns.into_iter().map(ColumnHeader::from).collect(),
             tables: header.tables.into_iter().map(TableHeader::from).collect(),
         }
@@ -156,6 +158,7 @@ impl DatabaseQueryClient {
             chromosome,
             columns: dataset.columns.clone(),
             path: self.path.clone(),
+            compression_algorithm: dataset.compression_algorithm,
         })
     }
 
@@ -174,6 +177,7 @@ struct TableIndex {
     chromosome: u8,
     columns: Vec<ColumnHeader>,
     path: PathBuf,
+    compression_algorithm: CompressionAlgorithm,
 }
 
 impl std::fmt::Debug for TableIndex {
@@ -403,7 +407,7 @@ impl RowReader {
 
         let mut compressed: Vec<u8> = Vec::new();
         let mut decompressed: Vec<u8> = Vec::new();
-        let decompressor = RowDecompressor::new(CompressionAlgorithm::None);
+        let decompressor = RowDecompressor::new(self.index.compression_algorithm);
 
         let mut rows = Vec::new();
         for (start, end) in blocks {

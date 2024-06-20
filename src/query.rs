@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, io::{Error, ErrorKind, Read, Seek, SeekFrom}, mem::size_of};
 use serde::Deserialize;
 
-use crate::{database::{HEADER_MAGIC, INDEX_MAGIC}, tsv_reader::ColumnType};
+use crate::{compression::CompressionAlgorithm, database::{HEADER_MAGIC, INDEX_MAGIC}, tsv_reader::ColumnType};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatabaseHeader {
@@ -12,6 +12,7 @@ pub struct DatabaseHeader {
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatasetHeader {
     pub name: String,
+    pub compression_algorithm: CompressionAlgorithm,
     pub columns: Vec<ColumnHeader>,
     pub tables: Vec<TableHeader>,
 }
@@ -92,6 +93,11 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
 
         for _ in 0..num_datasets {
             let name = self.read_string_u8()?;
+
+            let compression_algorithm_id = self.read_u8()?;
+            let compression_algorithm = CompressionAlgorithm::try_from(compression_algorithm_id)
+                .map_err(|_| Error::new(ErrorKind::InvalidData, format!("Unknown compression algorithm with id {}", compression_algorithm_id)))?;
+
             let num_columns = self.read_u8()? as usize;
 
             let mut columns = Vec::with_capacity(num_columns);
@@ -116,7 +122,7 @@ impl<R: Read + Seek> DatabaseQueryClient<R> {
                 tables.push(TableHeader{ chromosome, offset });
             }
 
-            datasets.push(DatasetHeader{ name, columns, tables });
+            datasets.push(DatasetHeader{ name, compression_algorithm, columns, tables });
         }
 
         Ok(DatabaseHeader{ version, datasets })

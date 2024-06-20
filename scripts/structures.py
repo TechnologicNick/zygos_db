@@ -7,6 +7,10 @@ class ColumnType(IntEnum):
     VolatileString = 2
     HashtableString = 3
 
+class CompressionAlgorithm(IntEnum):
+    None_ = 0
+    Gzip = 1
+
 ColumnHeader = Struct(
     "type" / Enum(Byte, ColumnType),
     "name" / PascalString(Byte, "utf8"),
@@ -24,6 +28,7 @@ TableIndexList = Struct(
 
 DatasetHeader = Struct(
     "name" / PascalString(Byte, "utf8"),
+    "compression_algorithm" / Enum(Byte, CompressionAlgorithm),
     "columns" / PrefixedArray(Byte, ColumnHeader),
     "tables" / PrefixedArray(Byte, Struct(
         "chromosome" / Byte,

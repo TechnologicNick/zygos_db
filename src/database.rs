@@ -6,7 +6,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 
 use crate::config::{Column, Config, Dataset};
 use crate::tsv_reader::{CellValue, TabSeparatedFileReader};
-use crate::compression::{CompressionAlgorithm, RowCompressor};
+use crate::compression::RowCompressor;
 
 pub const HEADER_MAGIC: &[u8] = b"ZygosDB";
 pub const HEADER_VERSION: u8 = 1;
@@ -104,18 +104,24 @@ impl Database {
     }
 
     fn serialize_dataset_header(&self, bytes: &mut Vec<u8>, dataset: &Dataset) -> Vec<(u8, usize)> {
+        // Name
         let dataset_name = &dataset.metadata.as_ref().unwrap().name;
         assert!(dataset_name.len() < 256);
 
         bytes.push(dataset_name.len() as u8);
         bytes.extend_from_slice(dataset_name.as_bytes());
 
+        // Compression algorithm
+        bytes.push(dataset.compression_algorithm as u8);
+
+        // Columns
         bytes.push(dataset.columns.len() as u8);
 
         for column in dataset.columns.iter() {
             self.serialize_column_header(bytes, &column);
         }
 
+        // Tables
         let paths = dataset.get_paths(&PathBuf::from("."));
         let file_count = paths.len();
         assert!(file_count < 256, "Too many files for dataset '{}': max 255, got {}", dataset_name, file_count);
@@ -230,7 +236,7 @@ impl Database {
 
                 let mut row_compressor = RowCompressor::new();
                 self.serialize_dataset_block(&mut row_compressor.buffer, dataset, chunk, i_block)?;
-                let compressed_size = row_compressor.compress(CompressionAlgorithm::None, bytes).map_err(|e| e.to_string())?;
+                let compressed_size = row_compressor.compress(dataset.compression_algorithm, bytes).map_err(|e| e.to_string())?;
 
                 println!("Block {} ({} rows) compressed from {} to {}", i_block, chunk.len(), row_compressor.buffer.len(), compressed_size);
 

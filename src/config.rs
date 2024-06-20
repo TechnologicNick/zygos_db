@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use serde::Deserialize;
-use crate::tsv_reader::{ColumnType, MissingValuePolicy};
+use crate::{compression::CompressionAlgorithm, tsv_reader::{ColumnType, MissingValuePolicy}};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -24,6 +24,7 @@ pub struct Dataset {
     pub path: String,
     pub columns: Vec<Column>,
     pub rows_per_index: usize,
+    pub compression_algorithm: CompressionAlgorithm,
 }
 
 #[derive(Debug)]

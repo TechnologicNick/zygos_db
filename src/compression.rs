@@ -1,9 +1,30 @@
 use std::io::{Read, Write};
 
+use serde::Deserialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum CompressionAlgorithm {
     None = 0,
     Gzip = 1,
+}
+
+impl Default for CompressionAlgorithm {
+    fn default() -> Self {
+        CompressionAlgorithm::None
+    }
+}
+
+impl TryFrom<u8> for CompressionAlgorithm {
+    type Error = ();
+
+    fn try_from(v: u8) -> Result<Self, ()> {
+        match v {
+            0 => Ok(CompressionAlgorithm::None),
+            1 => Ok(CompressionAlgorithm::Gzip),
+            _ => Err(()),
+        }
+    }
 }
 
 pub struct RowCompressor {
