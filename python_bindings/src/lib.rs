@@ -1,10 +1,13 @@
 #![feature(btree_cursors)]
+mod pyo3_utils;
 
 use std::{fs::{File, OpenOptions}, io::{BufReader, Cursor, Error, ErrorKind, Read, Seek}, path::PathBuf};
 
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyList};
+use pyo3_utils::new_from_iter;
 use zygos_db::{compression::{CompressionAlgorithm, RowDecompressor}, deserialize, ColumnType};
 use rhexdump::prelude::*;
+use rayon::prelude::*;
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -226,6 +229,19 @@ impl TableIndex {
         )?)
     }
 
+    fn create_query_parallel(&self, num_threads: Option<usize>) -> PyResult<ParallelRowReader> {
+        let row_readers = (0..num_threads.unwrap_or_else(rayon::current_num_threads))
+            .map(|_| RowReader::new(
+                self.path.clone(),
+                self.clone(),
+            ));
+
+        Ok(ParallelRowReader {
+            index: self.clone(),
+            row_readers: row_readers.collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:?}", self))
     }
@@ -264,7 +280,7 @@ impl RowReader {
     /// 
     /// A vector of bytes
     pub fn deserialize_range(
-        &mut self,
+        &self,
         bytes: &[u8],
         position_value_start: u64,
         position_value_end: u64,
@@ -388,7 +404,7 @@ impl RowReader {
     /// # Returns
     /// 
     /// A vector of rows
-    fn query_range(&mut self, position_value_start: u64, position_value_end: u64) -> Result<Vec<Row>, std::io::Error> {
+    fn query_range(&mut self, position_value_start: u64, position_value_end: u64) -> std::io::Result<Vec<Row>> {
         let mut range: Vec<(u64, u64)> = self.index.get_range(position_value_start, position_value_end)?;
 
         let start_offset = match range.first() {
@@ -432,6 +448,100 @@ impl RowReader {
         }
 
         Ok(rows)
+    }
+}
+
+fn divide_into_parts<I, T>(mut iter: I, num_parts: usize, len: usize) -> Vec<Vec<T>>
+where
+    I: Iterator<Item = T>,
+{
+    let mut result = Vec::with_capacity(num_parts);
+    let base_size = len / num_parts;
+    let remainder = len % num_parts;
+    let mut remaining_items = len;
+
+    for i in 0..num_parts {
+        let mut current_part_size = base_size;
+        if i < remainder {
+            current_part_size += 1;
+        }
+
+        let mut part = Vec::with_capacity(current_part_size);
+        for _ in 0..current_part_size {
+            if let Some(item) = iter.next() {
+                part.push(item);
+                remaining_items -= 1;
+            } else {
+                break;
+            }
+        }
+
+        result.push(part);
+    }
+
+    // If there are remaining items due to rounding in division, distribute them
+    // to the earlier parts.
+    for i in 0..remainder {
+        if let Some(item) = iter.next() {
+            result[i].push(item);
+            remaining_items -= 1;
+        } else {
+            break;
+        }
+    }
+
+    assert_eq!(remaining_items, 0, "Iterator did not yield expected number of items");
+
+    result
+}
+
+#[pyclass]
+struct ParallelRowReader {
+    #[allow(dead_code)]
+    index: TableIndex,
+    row_readers: Vec<RowReader>,
+}
+
+#[pymethods]
+impl ParallelRowReader {
+    fn query_range(&mut self, py: Python<'_>, position_value_start: u64, position_value_end: u64) -> std::io::Result<PyObject> {
+        let mut range: Vec<(u64, u64)> = self.index.get_range(position_value_start, position_value_end)?;
+        if range.is_empty() {
+            return Ok(PyList::empty_bound(py).into());
+        }
+
+        let range_len = range.len();
+
+        // Append the end of the index to the range
+        range.push((position_value_end, self.index.inner.index_start_offset));
+
+        let blocks = range.windows(2).map(|window| {
+            let [start, end] = window else { unreachable!() };
+            (start, end)
+        });
+
+        let block_jobs = divide_into_parts(blocks, self.row_readers.len(), range_len);
+
+
+        // TODO: If the amount of blocks is less than the amount of threads, we don't need to use all threads.
+        // TODO: Actually use num_threads.
+        let res = self.row_readers.par_iter_mut().enumerate().map(|(i, reader)| {
+            let blocks = &block_jobs[i];
+            if blocks.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let (position_value_start, _) = blocks.first().unwrap().0;
+            let (position_value_end, _) = blocks.last().unwrap().1;
+            reader.query_range(*position_value_start, *position_value_end)
+        }).collect::<Result<Vec<_>, _>>()?;
+
+        let len = res.iter().map(Vec::len).sum();
+        let flattened = res
+            .into_iter()
+            .flat_map(|inner| inner)
+            .map(|row| row.into_py(py));
+        Ok(new_from_iter(py, len, &mut flattened.into_iter()).into())
     }
 }
 

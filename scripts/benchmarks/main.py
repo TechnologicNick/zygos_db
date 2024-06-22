@@ -4,6 +4,7 @@ from config import Config
 from test_base import TestQuery
 from test_zygos_db import TestZygosDB
 from test_tabix import TestTabix
+from test_zygos_db_parallel import TestZygosDBParallel
 
 def draw_samples(positions_per_chromosome: dict[int, list[int]], window_size: int, num_samples: int):
     windows: list[TestQuery] = []
@@ -49,6 +50,9 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
             test_classes.append(TestZygosDB(config))
         elif test == "tabix":
             test_classes.append(TestTabix(config))
+        elif test.startswith("zygos_db_parallel_"):
+            num_threads = int(test.split("_")[-1])
+            test_classes.append(TestZygosDBParallel(config, num_threads))
 
     for test in test_classes:
         print(f"[{test.name}] Setting up...")
@@ -80,16 +84,17 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
     return (warmup_throughput, test_throughput)
 
 if __name__ == "__main__":
-    results = []
-    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1, num_samples=6000000, duration=60, warmup=10))
-    print(results)
-    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10, num_samples=6000000, duration=60, warmup=10))
-    print(results)
-    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100, num_samples=3000000, duration=60, warmup=10))
-    print(results)
-    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1000, num_samples=1000000, duration=60, warmup=10))
-    print(results)
-    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10000, num_samples=1000000, duration=60, warmup=10))
-    print(results)
-    results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=1000000, duration=60, warmup=10))
-    print(results)
+    print(run_benchmarks(tests=["zygos_db_parallel_1", "zygos_db"], window_size=100000, num_samples=100000, duration=10, warmup=0))
+    # results = []
+    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1, num_samples=6000000, duration=60, warmup=10))
+    # print(results)
+    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10, num_samples=6000000, duration=60, warmup=10))
+    # print(results)
+    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100, num_samples=3000000, duration=60, warmup=10))
+    # print(results)
+    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1000, num_samples=1000000, duration=60, warmup=10))
+    # print(results)
+    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10000, num_samples=1000000, duration=60, warmup=10))
+    # print(results)
+    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=1000000, duration=60, warmup=10))
+    # print(results)
