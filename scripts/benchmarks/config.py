@@ -35,4 +35,9 @@ class Config:
         client = DatabaseQueryClient(self.zygos_db_file)
         dataset = [dataset for dataset in client.header.datasets if dataset.name == self.zygos_db_dataset][0]
         return [table.chromosome for table in dataset.tables]
+    
+    def get_compression_algorithm(self) -> str:
+        client = DatabaseQueryClient(self.zygos_db_file)
+        dataset = [dataset for dataset in client.header.datasets if dataset.name == self.zygos_db_dataset][0]
+        return dataset.compression_algorithm
 

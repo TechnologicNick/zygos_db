@@ -97,6 +97,11 @@ impl DatasetHeader {
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!("{:?}", self))
     }
+
+    #[getter]
+    fn compression_algorithm(&self) -> String {
+        format!("{:?}", self.compression_algorithm)
+    }
 }
 
 #[pymethods]

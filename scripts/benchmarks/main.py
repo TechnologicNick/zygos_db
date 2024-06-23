@@ -1,4 +1,5 @@
 import gc
+import json
 import math
 import random
 from config import Config
@@ -32,6 +33,9 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
     print("[+] Reading all chromosomes...")
     chromosomes = config.get_all_chromosomes()
     print("[+] Found chromosomes:", chromosomes)
+
+    compression_algorithm = config.get_compression_algorithm()
+    print("[+] Compression algorithm:", compression_algorithm)
 
     print("[+] Reading all positions...")
     positions_per_chromosome = { chromosome: config.get_all_positions(chromosome) for chromosome in chromosomes }
@@ -88,10 +92,59 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
             print("ERROR:", e)
             exit(1)
 
-    return (warmup_throughput, test_throughput)
+    return (compression_algorithm, test_throughput)
 
 if __name__ == "__main__":
-    print(run_benchmarks(tests=["zygos_db_parallel_1", "zygos_db"], window_size=100000, num_samples=100000, duration=10, warmup=0))
+    window_size = 100000
+    num_samples = 100000
+    duration = 10
+    warmup = 0
+    (compression_algorithm, results_parallel) = run_benchmarks(tests=[
+        "zygos_db_parallel_1",
+        "zygos_db_parallel_2",
+        "zygos_db_parallel_3",
+        "zygos_db_parallel_4",
+        "zygos_db_parallel_5",
+        "zygos_db_parallel_6",
+        "zygos_db_parallel_7",
+        "zygos_db_parallel_8",
+        "zygos_db_parallel_9",
+        "zygos_db_parallel_10",
+        "zygos_db_parallel_11",
+        "zygos_db_parallel_12",
+        "zygos_db_parallel_13",
+        "zygos_db_parallel_14",
+        "zygos_db_parallel_15",
+        "zygos_db_parallel_16",
+        "zygos_db_parallel_17",
+        "zygos_db_parallel_18",
+        "zygos_db_parallel_19",
+        "zygos_db_parallel_20",
+        "zygos_db_parallel_21",
+        "zygos_db_parallel_22",
+        "zygos_db_parallel_23",
+        "zygos_db_parallel_24",
+        "zygos_db_parallel_25",
+        "zygos_db_parallel_26",
+        "zygos_db_parallel_27",
+        "zygos_db_parallel_28",
+        "zygos_db_parallel_29",
+        "zygos_db_parallel_30",
+        "zygos_db_parallel_31",
+        "zygos_db_parallel_32",
+        "zygos_db",
+    ], window_size=window_size, num_samples=num_samples, duration=duration, warmup=warmup)
+    output = json.dumps({
+        "window_size": window_size,
+        "num_samples": num_samples,
+        "duration": duration,
+        "warmup": warmup,
+        "results": results_parallel,
+    }, indent=4)
+    print(output)
+    with open(f"./results/parallel/{compression_algorithm}.json", "w") as f:
+        f.write(output)
+
     # results = []
     # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1, num_samples=6000000, duration=60, warmup=10))
     # print(results)
