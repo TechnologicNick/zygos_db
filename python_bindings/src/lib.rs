@@ -521,11 +521,9 @@ impl ParallelRowReader {
         });
 
         let block_jobs = divide_into_parts(blocks, self.row_readers.len(), range_len);
+        let num_non_empty_blocks = block_jobs.iter().filter(|blocks| !blocks.is_empty()).count();
 
-
-        // TODO: If the amount of blocks is less than the amount of threads, we don't need to use all threads.
-        // TODO: Actually use num_threads.
-        let res = self.row_readers.par_iter_mut().enumerate().map(|(i, reader)| {
+        let res = self.row_readers[..num_non_empty_blocks].par_iter_mut().enumerate().map(|(i, reader)| {
             let blocks = &block_jobs[i];
             if blocks.is_empty() {
                 return Ok(Vec::new());
