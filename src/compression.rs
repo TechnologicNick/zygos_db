@@ -7,6 +7,8 @@ use serde::Deserialize;
 pub enum CompressionAlgorithm {
     None = 0,
     Gzip = 1,
+    #[serde(rename = "lz4")]
+    LZ4 = 2,
 }
 
 impl Default for CompressionAlgorithm {
@@ -22,6 +24,7 @@ impl TryFrom<u8> for CompressionAlgorithm {
         match v {
             0 => Ok(CompressionAlgorithm::None),
             1 => Ok(CompressionAlgorithm::Gzip),
+            2 => Ok(CompressionAlgorithm::LZ4),
             _ => Err(()),
         }
     }
@@ -49,6 +52,12 @@ impl RowCompressor {
                 encoder.try_finish()?;
                 Ok(self.buffer.len())
             }
+            CompressionAlgorithm::LZ4 => {
+                let mut encoder = lz4::EncoderBuilder::new().level(9).build(bytes)?;
+                encoder.write_all(&self.buffer)?;
+                encoder.finish().1?;
+                Ok(self.buffer.len())
+            }
         }
     }
 }
@@ -72,6 +81,12 @@ impl RowDecompressor {
             }
             CompressionAlgorithm::Gzip => {
                 let mut decoder = flate2::read::GzDecoder::new(bytes);
+                buffer.clear();
+                decoder.read_to_end(buffer)?;
+                Ok(buffer.as_slice())
+            }
+            CompressionAlgorithm::LZ4 => {
+                let mut decoder = lz4::Decoder::new(bytes)?;
                 buffer.clear();
                 decoder.read_to_end(buffer)?;
                 Ok(buffer.as_slice())
