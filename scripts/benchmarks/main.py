@@ -132,7 +132,6 @@ if __name__ == "__main__":
         "zygos_db_parallel_30",
         "zygos_db_parallel_31",
         "zygos_db_parallel_32",
-        "zygos_db",
     ], window_size=window_size, num_samples=num_samples, duration=duration, warmup=warmup)
     output = json.dumps({
         "window_size": window_size,
@@ -142,7 +141,7 @@ if __name__ == "__main__":
         "results": results_parallel,
     }, indent=4)
     print(output)
-    with open(f"./results/parallel/{compression_algorithm}.json", "w") as f:
+    with open(f"./results/parallel/{compression_algorithm}.json", "w+") as f:
         f.write(output)
 
     # results = []
