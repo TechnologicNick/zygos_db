@@ -7,11 +7,11 @@ from config import Config
 from test_base import Test
 
 class TestZygosDBParallel(Test):
-    table_indices: dict[int, object] = {}
-    parallel_row_reader_s: dict[int, object] = {}
-
     def __init__(self, config: Config, num_threads: int):
         super().__init__(config, f"ZygosDB (threads={num_threads})")
+
+        self.table_indices: dict[int, object] = {}
+        self.parallel_row_reader_s: dict[int, object] = {}
         self.num_threads = num_threads
 
     def setup(self, chromosomes: list[int]):
@@ -19,10 +19,10 @@ class TestZygosDBParallel(Test):
         # print(client.header.datasets)
 
         for chromosome in chromosomes:
-            table_index = measure_time(lambda: client.read_table_index(self.config.zygos_db_dataset, chromosome), f"[{self.name}] Reading table index for chromosome {chromosome}")
+            table_index = client.read_table_index(self.config.zygos_db_dataset, chromosome)
             # print(table_index)
 
-            parallel_row_reader = table_index.create_query_parallel()
+            parallel_row_reader = table_index.create_query_parallel(self.num_threads)
             # print(row_reader)
 
             self.table_indices[chromosome] = table_index

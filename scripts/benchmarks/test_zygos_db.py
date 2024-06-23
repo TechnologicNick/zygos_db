@@ -7,18 +7,18 @@ from config import Config
 from test_base import Test
 
 class TestZygosDB(Test):
-    table_indices: dict[int, object] = {}
-    row_readers: dict[int, object] = {}
-
     def __init__(self, config: Config):
         super().__init__(config, "ZygosDB")
+
+        self.table_indices: dict[int, object] = {}
+        self.row_readers: dict[int, object] = {}
 
     def setup(self, chromosomes: list[int]):
         client = measure_time(lambda: DatabaseQueryClient(self.config.zygos_db_file), f"[{self.name}] Creating client")
         # print(client.header.datasets)
 
         for chromosome in chromosomes:
-            table_index = measure_time(lambda: client.read_table_index(self.config.zygos_db_dataset, chromosome), f"[{self.name}] Reading table index for chromosome {chromosome}")
+            table_index = client.read_table_index(self.config.zygos_db_dataset, chromosome)
             # print(table_index)
 
             row_reader = table_index.create_query()
