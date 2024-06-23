@@ -145,15 +145,18 @@ if __name__ == "__main__":
         f.write(output)
 
     # results = []
-    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1, num_samples=6000000, duration=60, warmup=10))
+    # results.append(run_benchmarks(tests=["zygos_db"], window_size=1, num_samples=6000000, duration=60, warmup=10))
     # print(results)
-    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10, num_samples=6000000, duration=60, warmup=10))
+    # results.append(run_benchmarks(tests=["zygos_db"], window_size=10, num_samples=6000000, duration=60, warmup=10))
     # print(results)
-    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100, num_samples=3000000, duration=60, warmup=10))
+    # results.append(run_benchmarks(tests=["zygos_db"], window_size=100, num_samples=3000000, duration=60, warmup=10))
     # print(results)
-    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=1000, num_samples=1000000, duration=60, warmup=10))
+    # results.append(run_benchmarks(tests=["zygos_db"], window_size=1000, num_samples=1000000, duration=60, warmup=10))
     # print(results)
-    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=10000, num_samples=1000000, duration=60, warmup=10))
+    # results.append(run_benchmarks(tests=["zygos_db"], window_size=10000, num_samples=1000000, duration=60, warmup=10))
     # print(results)
-    # results.append(run_benchmarks(tests=["zygos_db", "tabix"], window_size=100000, num_samples=1000000, duration=60, warmup=10))
+    # results.append(run_benchmarks(tests=["zygos_db"], window_size=100000, num_samples=1000000, duration=60, warmup=10))
     # print(results)
+
+    # for result in zip([1, 10, 100, 1000, 10000, 100000], results):
+    #     print(result)
