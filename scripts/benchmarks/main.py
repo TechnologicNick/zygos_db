@@ -1,3 +1,4 @@
+import gc
 import math
 import random
 from config import Config
@@ -66,7 +67,10 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
             print(f"[{test.name}] ===== Warming up for {warmup} seconds...")
 
             try:
+                gc.disable()
+                gc.collect()
                 throughput = test.run(warmup_samples, warmup)
+                gc.enable()
                 warmup_throughput[test.name] = throughput
             except RuntimeError as e:
                 print("ERROR during warmup:", e)
@@ -75,7 +79,10 @@ def run_benchmarks(tests: list[str], window_size: int, num_samples: int, duratio
         print(f"[{test.name}] ===== Running for {duration} seconds...")
 
         try:
+            gc.disable()
+            gc.collect()
             throughput = test.run(samples, duration)
+            gc.enable()
             test_throughput[test.name] = throughput
         except RuntimeError as e:
             print("ERROR:", e)
