@@ -1,7 +1,7 @@
 #![feature(btree_cursors)]
 mod pyo3_utils;
 
-use std::{fs::{File, OpenOptions}, io::{BufReader, Cursor, Error, ErrorKind, Read, Seek}, path::PathBuf};
+use std::{cmp::max, fs::{File, OpenOptions}, io::{BufReader, Cursor, Error, ErrorKind, Read, Seek}, path::PathBuf};
 
 use pyo3::{prelude::*, types::PyList};
 use pyo3_utils::new_from_iter;
@@ -291,7 +291,7 @@ impl RowReader {
         position_value_end: u64,
         out_rows: &mut Vec<Row>,
     ) -> std::io::Result<()> {
-        // println!("Deserializing range: {} - {}", position_value_start, position_value_end);
+        // println!("Deserializing range: {}:{}-{}", self.index.chromosome, position_value_start, position_value_end);
 
         let offset_start: u64 = 0;
         let offset_end = bytes.len() as u64;
@@ -446,7 +446,7 @@ impl RowReader {
 
             self.deserialize_range(
                 &slice,
-                start.0,
+                max(start.0, position_value_start),
                 end.0,
                 &mut rows,
             )?;
